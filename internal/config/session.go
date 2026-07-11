@@ -40,6 +40,7 @@ type Options struct {
 	CIVariables bool `json:"ci_variables"`
 	Settings    bool `json:"settings"`
 	URLRewrite  bool `json:"url_rewrite"`
+	Releases    bool `json:"releases"`
 }
 
 // Session is a persisted migration configuration.

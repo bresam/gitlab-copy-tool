@@ -105,8 +105,8 @@ func (m *model) viewDryRun() string {
 	}
 	o := m.session.Options
 	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf(
-		"Optionen: Issues/MRs=%v CI-Vars=%v Settings=%v URL-Rewrite=%v · bekannte Pfad-Remaps: %d",
-		o.Issues, o.CIVariables, o.Settings, o.URLRewrite, len(m.session.PathMap))) + "\n\n")
+		"Optionen: Issues/MRs=%v CI-Vars=%v Settings=%v URL-Rewrite=%v Releases=%v · bekannte Pfad-Remaps: %d",
+		o.Issues, o.CIVariables, o.Settings, o.URLRewrite, o.Releases, len(m.session.PathMap))) + "\n\n")
 	b.WriteString(dimStyle.Render("b/esc zurück zum Mapping · q beenden"))
 	return b.String()
 }
@@ -206,7 +206,7 @@ func (m *model) viewMap() string {
 	if m.dryRun {
 		startHint = "ctrl+s " + warnStyle.Render("Plan zeigen (Dry-Run)")
 	}
-	b.WriteString(dimStyle.Render("↑/↓ · space wählen · ←/→ Ziel setzen (Gruppe = vererbt) · f force · a alle · N keine · 1-4 Optionen · ") + startHint + dimStyle.Render(" · esc zurück"))
+	b.WriteString(dimStyle.Render("↑/↓ · space wählen · ←/→ Ziel setzen (Gruppe = vererbt) · f force · a alle · N keine · 1-5 Optionen · ") + startHint + dimStyle.Render(" · esc zurück"))
 	return b.String()
 }
 
@@ -309,7 +309,8 @@ func (m *model) renderOptions() string {
 		"1 " + mark(o.Issues) + " Issues/MRs/Labels/Milestones   " +
 		"2 " + mark(o.CIVariables) + " CI-Vars   " +
 		"3 " + mark(o.Settings) + " Settings   " +
-		"4 " + mark(o.URLRewrite) + " URL-Rewrite"
+		"4 " + mark(o.URLRewrite) + " URL-Rewrite   " +
+		"5 " + mark(o.Releases) + " Releases"
 }
 
 func (m *model) viewRun() string {

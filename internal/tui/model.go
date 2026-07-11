@@ -107,7 +107,7 @@ func newModel() model {
 			Source:      config.Endpoint{Transport: config.TransportAuto},
 			Target:      config.Endpoint{Transport: config.TransportAuto},
 			Assignments: map[int64]string{},
-			Options:     config.Options{Issues: true, CIVariables: true, Settings: true, URLRewrite: true},
+			Options:     config.Options{Issues: true, CIVariables: true, Settings: true, URLRewrite: true, Releases: true},
 		},
 	}
 	m.buildInputs()

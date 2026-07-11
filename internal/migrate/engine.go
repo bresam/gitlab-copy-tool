@@ -318,6 +318,13 @@ func (e *Engine) copyMetadata(plan Plan, node *gitlabapi.Node, tgtProj *gitlab.P
 			logf("merge requests copied")
 		}
 	}
+	if plan.Options.Releases {
+		if err := gitlabapi.CopyReleases(e.src, e.tgt, node.ID, tgtProj.ID); err != nil {
+			warn("releases", err)
+		} else {
+			logf("releases copied")
+		}
+	}
 	if plan.Options.CIVariables {
 		if err := gitlabapi.CopyCIVariables(e.src, e.tgt, node.ID, tgtProj.ID); err != nil {
 			warn("ci-variables", err)

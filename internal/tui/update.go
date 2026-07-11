@@ -102,7 +102,7 @@ func (m *model) updateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 					Source:      config.Endpoint{Transport: config.TransportAuto},
 					Target:      config.Endpoint{Transport: config.TransportAuto},
 					Assignments: map[int64]string{},
-					Options:     config.Options{Issues: true, CIVariables: true, Settings: true, URLRewrite: true},
+					Options:     config.Options{Issues: true, CIVariables: true, Settings: true, URLRewrite: true, Releases: true},
 				}
 			}
 			m.buildInputs()
@@ -337,6 +337,8 @@ func (m *model) updateMap(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.session.Options.Settings = !m.session.Options.Settings
 	case "4":
 		m.session.Options.URLRewrite = !m.session.Options.URLRewrite
+	case "5":
+		m.session.Options.Releases = !m.session.Options.Releases
 	case "f":
 		m.toggleForce(m.cursor)
 	case "ctrl+s", "enter":
