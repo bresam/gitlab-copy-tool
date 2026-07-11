@@ -31,6 +31,19 @@ Repository content (branches/tags) travels via `git clone --mirror` →
 > groups or settings. Archiving or deleting the old repositories after a
 > successful migration is a **manual step** you perform yourself.
 
+## Download
+
+Prebuilt binaries for the **latest release** (no runtime dependency):
+
+- 🐧 **Linux (x86-64)** — [gitlab-copy-tool-linux-amd64](https://github.com/bresam/gitlab-copy-tool/releases/latest/download/gitlab-copy-tool-linux-amd64)
+- 🍎 **macOS (Apple Silicon)** — [gitlab-copy-tool-darwin-arm64](https://github.com/bresam/gitlab-copy-tool/releases/latest/download/gitlab-copy-tool-darwin-arm64)
+- 🪟 **Windows (x86-64)** — [gitlab-copy-tool-windows-amd64.exe](https://github.com/bresam/gitlab-copy-tool/releases/latest/download/gitlab-copy-tool-windows-amd64.exe)
+
+On Linux/macOS make it executable (`chmod +x gitlab-copy-tool-*`). macOS may
+quarantine an unsigned binary — clear it with
+`xattr -d com.apple.quarantine gitlab-copy-tool-darwin-arm64`. Or
+[build from source](#installation).
+
 ---
 
 ## What the tool shows in the terminal
