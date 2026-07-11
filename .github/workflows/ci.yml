@@ -1,0 +1,64 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        run: |
+          fmt=$(gofmt -l .)
+          if [ -n "$fmt" ]; then
+            echo "These files are not gofmt-ed:"
+            echo "$fmt"
+            exit 1
+          fi
+
+      - name: Build
+        run: go build ./...
+
+      - name: Vet
+        run: go vet ./...
+
+      - name: Test
+        run: go test ./...
+
+  build:
+    needs: test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cross-compile into dist/
+        env:
+          CGO_ENABLED: "0"
+        run: |
+          mkdir -p dist
+          build() { GOOS=$1 GOARCH=$2 go build -trimpath -ldflags "-s -w" -o "dist/$3" . ; }
+          build linux   amd64 gitlab-copy-tool-linux-amd64
+          build darwin   arm64 gitlab-copy-tool-darwin-arm64
+          build windows  amd64 gitlab-copy-tool-windows-amd64.exe
+          ls -lh dist
+
+      - name: Upload binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: gitlab-copy-tool-binaries
+          path: dist/
+          if-no-files-found: error

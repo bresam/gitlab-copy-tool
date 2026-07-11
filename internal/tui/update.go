@@ -1,0 +1,619 @@
+package tui
+
+import (
+	"fmt"
+	"os"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/bresam/gitlab-copy-tool/internal/config"
+	"github.com/bresam/gitlab-copy-tool/internal/gitlabapi"
+	"github.com/bresam/gitlab-copy-tool/internal/migrate"
+	tea "github.com/charmbracelet/bubbletea"
+)
+
+// formFieldCount is the number of focusable fields on the connect screen:
+// srcURL, srcToken, srcTransport, tgtURL, tgtToken, tgtTransport.
+const formFieldCount = 6
+
+func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		m.logView = newViewport(msg.Width, msg.Height)
+		return m, nil
+	}
+
+	// Route by screen.
+	switch m.screen {
+	case screenSession:
+		return m.updateSession(msg)
+	case screenConnect:
+		return m.updateConnect(msg)
+	case screenDiscover:
+		return m.updateDiscover(msg)
+	case screenMap:
+		return m.updateMap(msg)
+	case screenRun:
+		return m.updateRun(msg)
+	case screenDone:
+		return m.updateDone(msg)
+	case screenDryRun:
+		return m.updateDryRun(msg)
+	}
+	return m, nil
+}
+
+// --- session picker ------------------------------------------------------
+
+func (m *model) updateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyMsg); ok {
+		switch k.String() {
+		case "ctrl+c", "q":
+			return m, tea.Quit
+		case "up", "k":
+			if m.sessCursor > 0 {
+				m.sessCursor--
+			}
+		case "down", "j":
+			if m.sessCursor < len(m.sessions) {
+				m.sessCursor++
+			}
+		case "d":
+			if m.sessCursor < len(m.sessions) {
+				_ = config.Remove(m.sessions[m.sessCursor])
+				m.sessions, _ = config.List()
+				if m.sessCursor > len(m.sessions) {
+					m.sessCursor = len(m.sessions)
+				}
+			}
+		case "c":
+			// Clear run state (selection/assignments/force/path map) but keep
+			// endpoints, tokens and options. In dry-run mode the clear is only
+			// temporary (in-memory) and not written to disk.
+			if m.sessCursor < len(m.sessions) {
+				name := m.sessions[m.sessCursor]
+				if m.dryRun {
+					m.tempCleared[name] = true
+				} else if s, err := config.Load(name); err == nil {
+					s.ClearState()
+					if err := config.Save(s, time.Now()); err == nil {
+						m.cleared[name] = true
+					}
+				}
+			}
+		case "enter":
+			// Start from a clean working set for the chosen session.
+			m.selected = map[int64]bool{}
+			m.assign = map[int64]int{}
+			m.forced = map[int64]bool{}
+			if m.sessCursor < len(m.sessions) {
+				name := m.sessions[m.sessCursor]
+				if s, err := config.Load(name); err == nil {
+					if m.tempCleared[name] {
+						s.ClearState() // in-memory only
+					}
+					m.session = *s
+				}
+			} else {
+				// New session.
+				m.session = config.Session{
+					Source:      config.Endpoint{Transport: config.TransportAuto},
+					Target:      config.Endpoint{Transport: config.TransportAuto},
+					Assignments: map[int64]string{},
+					Options:     config.Options{Issues: true, CIVariables: true, Settings: true, URLRewrite: true},
+				}
+			}
+			m.buildInputs()
+			m.screen = screenConnect
+		}
+	}
+	return m, nil
+}
+
+// --- connect form --------------------------------------------------------
+
+func (m *model) updateConnect(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case connectedMsg:
+		m.testing = false
+		if msg.err != nil {
+			m.err = msg.err
+			return m, nil
+		}
+		m.err = nil
+		srcClient, tgtClient = msg.src, msg.tgt
+		m.srcInfo, m.tgtInfo = msg.srcInfo, msg.tgtInfo
+		m.screen = screenDiscover
+		m.discovering = true
+		return m, tea.Batch(m.spin.Tick, discoverCmd(srcClient, tgtClient))
+
+	case tea.KeyMsg:
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "esc":
+			m.screen = screenSession
+			return m, nil
+		case "ctrl+s":
+			m.syncFormToSession()
+			m.testing = true
+			m.err = nil
+			return m, tea.Batch(m.spin.Tick, connectCmd(m.session.Source, m.session.Target))
+		case "tab", "down":
+			m.focusField((m.formField + 1) % formFieldCount)
+			return m, nil
+		case "shift+tab", "up":
+			m.focusField((m.formField - 1 + formFieldCount) % formFieldCount)
+			return m, nil
+		case "left", "right", " ":
+			if idx := transportFieldIndex(m.formField); idx >= 0 {
+				m.transport[idx] = cycleTransport(m.transport[idx], msg.String() != "left")
+				return m, nil
+			}
+		}
+	}
+
+	// Feed key events to the focused text input.
+	if inputIdx := inputForField(m.formField); inputIdx >= 0 {
+		var cmd tea.Cmd
+		m.inputs[inputIdx], cmd = m.inputs[inputIdx].Update(msg)
+		return m, cmd
+	}
+	return m, nil
+}
+
+func (m *model) focusField(f int) {
+	m.formField = f
+	for i := range m.inputs {
+		m.inputs[i].Blur()
+	}
+	if idx := inputForField(f); idx >= 0 {
+		m.inputs[idx].Focus()
+	}
+}
+
+// inputForField maps a form field index to a text input index, or -1 for the
+// transport selectors.
+func inputForField(f int) int {
+	switch f {
+	case 0:
+		return 0 // src url
+	case 1:
+		return 1 // src token
+	case 3:
+		return 2 // tgt url
+	case 4:
+		return 3 // tgt token
+	}
+	return -1
+}
+
+func transportFieldIndex(f int) int {
+	switch f {
+	case 2:
+		return 0
+	case 5:
+		return 1
+	}
+	return -1
+}
+
+func cycleTransport(cur string, forward bool) string {
+	order := []string{config.TransportAuto, config.TransportSSH, config.TransportHTTPS}
+	i := 0
+	for k, v := range order {
+		if v == cur {
+			i = k
+		}
+	}
+	if forward {
+		i = (i + 1) % len(order)
+	} else {
+		i = (i - 1 + len(order)) % len(order)
+	}
+	return order[i]
+}
+
+func (m *model) syncFormToSession() {
+	m.session.Source.URL = m.inputs[0].Value()
+	m.session.Source.Token = m.inputs[1].Value()
+	m.session.Target.URL = m.inputs[2].Value()
+	m.session.Target.Token = m.inputs[3].Value()
+	m.session.Source.Transport = m.transport[0]
+	m.session.Target.Transport = m.transport[1]
+}
+
+// --- discovery -----------------------------------------------------------
+
+func (m *model) updateDiscover(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case discoveredMsg:
+		m.discovering = false
+		if msg.err != nil {
+			m.err = msg.err
+			m.screen = screenConnect
+			return m, nil
+		}
+		m.roots = msg.roots
+		m.namespaces = msg.namespaces
+		m.rows = flatten(msg.roots, nil, nil)
+		m.applySavedSelection()
+		m.screen = screenMap
+		return m, nil
+	case tea.KeyMsg:
+		if s := msg.String(); s == "ctrl+c" || s == "q" {
+			return m, tea.Quit
+		}
+	}
+	var cmd tea.Cmd
+	m.spin, cmd = m.spin.Update(msg)
+	return m, cmd
+}
+
+// flatten linearises the tree and precomputes each row's tree-connector prefix.
+// ancestorsLast[i] tells whether the ancestor at level i was the last of its
+// siblings (→ blank spacer) or not (→ a continuing vertical line).
+func flatten(nodes []*gitlabapi.Node, ancestorsLast []bool, acc []treeRow) []treeRow {
+	for i, n := range nodes {
+		isLast := i == len(nodes)-1
+		var sb strings.Builder
+		for _, al := range ancestorsLast {
+			if al {
+				sb.WriteString("   ")
+			} else {
+				sb.WriteString("│  ")
+			}
+		}
+		if isLast {
+			sb.WriteString("└─ ")
+		} else {
+			sb.WriteString("├─ ")
+		}
+		acc = append(acc, treeRow{node: n, depth: len(ancestorsLast), prefix: sb.String()})
+		child := append(append([]bool{}, ancestorsLast...), isLast)
+		acc = flatten(n.Children, child, acc)
+	}
+	return acc
+}
+
+// applySavedSelection restores selection, per-node target assignments and the
+// force flags from the session.
+func (m *model) applySavedSelection() {
+	for _, id := range m.session.Selected {
+		m.selected[id] = true
+	}
+	for _, id := range m.session.Force {
+		m.forced[id] = true
+	}
+	nsIndex := map[string]int{}
+	for i, ns := range m.namespaces {
+		nsIndex[ns.FullPath] = i
+	}
+	for id, path := range m.session.Assignments {
+		if idx, ok := nsIndex[path]; ok {
+			m.assign[id] = idx
+		}
+	}
+}
+
+// --- mapping -------------------------------------------------------------
+
+func (m *model) updateMap(msg tea.Msg) (tea.Model, tea.Cmd) {
+	k, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch k.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "esc":
+		m.screen = screenConnect
+		return m, nil
+	case "up", "k":
+		if m.cursor > 0 {
+			m.cursor--
+		}
+	case "down", "j":
+		if m.cursor < len(m.rows)-1 {
+			m.cursor++
+		}
+	case " ":
+		m.toggleRow(m.cursor)
+	case "left":
+		m.cycleTarget(m.cursor, false)
+	case "right":
+		m.cycleTarget(m.cursor, true)
+	case "a":
+		m.setAll(true)
+	case "N":
+		m.setAll(false)
+	case "1":
+		m.session.Options.Issues = !m.session.Options.Issues
+	case "2":
+		m.session.Options.CIVariables = !m.session.Options.CIVariables
+	case "3":
+		m.session.Options.Settings = !m.session.Options.Settings
+	case "4":
+		m.session.Options.URLRewrite = !m.session.Options.URLRewrite
+	case "f":
+		m.toggleForce(m.cursor)
+	case "ctrl+s", "enter":
+		return m.startRun()
+	}
+	return m, nil
+}
+
+func (m *model) toggleRow(i int) {
+	if i < 0 || i >= len(m.rows) {
+		return
+	}
+	n := m.rows[i].node
+	if n.Kind == "project" {
+		m.selected[n.ID] = !m.selected[n.ID]
+		return
+	}
+	// Group: if any descendant project unselected, select all; else clear.
+	ids := descendantProjectIDs(n)
+	anyOff := false
+	for _, id := range ids {
+		if !m.selected[id] {
+			anyOff = true
+			break
+		}
+	}
+	for _, id := range ids {
+		m.selected[id] = anyOff
+	}
+}
+
+// toggleForce flips the per-project force-overwrite flag for the highlighted
+// project (or every descendant project of a highlighted group).
+func (m *model) toggleForce(i int) {
+	if i < 0 || i >= len(m.rows) {
+		return
+	}
+	n := m.rows[i].node
+	if n.Kind == "project" {
+		m.forced[n.ID] = !m.forced[n.ID]
+		return
+	}
+	ids := descendantProjectIDs(n)
+	anyOff := false
+	for _, id := range ids {
+		if !m.forced[id] {
+			anyOff = true
+			break
+		}
+	}
+	for _, id := range ids {
+		m.forced[id] = anyOff
+	}
+}
+
+func (m *model) setAll(v bool) {
+	for _, r := range m.rows {
+		if r.node.Kind == "project" {
+			m.selected[r.node.ID] = v
+		}
+	}
+}
+
+// cycleTarget cycles the target-namespace assignment of the highlighted node
+// (group or project) through: none -> ns[0] -> ns[1] -> … -> none. A group
+// assignment cascades to descendants (see gitlabapi.ResolveTargets).
+func (m *model) cycleTarget(i int, forward bool) {
+	if i < 0 || i >= len(m.rows) || len(m.namespaces) == 0 {
+		return
+	}
+	id := m.rows[i].node.ID
+	idx, ok := m.assign[id]
+	last := len(m.namespaces) - 1
+	if forward {
+		switch {
+		case !ok:
+			m.assign[id] = 0
+		case idx >= last:
+			delete(m.assign, id) // wrap back to none
+		default:
+			m.assign[id] = idx + 1
+		}
+	} else {
+		switch {
+		case !ok:
+			m.assign[id] = last
+		case idx == 0:
+			delete(m.assign, id) // wrap back to none
+		default:
+			m.assign[id] = idx - 1
+		}
+	}
+}
+
+// assignmentPaths converts the index-based assignments to node ID -> namespace
+// full path for gitlabapi.ResolveTargets.
+func (m *model) assignmentPaths() map[int64]string {
+	out := make(map[int64]string, len(m.assign))
+	for id, idx := range m.assign {
+		if idx >= 0 && idx < len(m.namespaces) {
+			out[id] = m.namespaces[idx].FullPath
+		}
+	}
+	return out
+}
+
+// effectiveTargets resolves the target namespace for every selected project.
+func (m *model) effectiveTargets() map[int64]string {
+	all := map[int64]bool{}
+	for _, r := range m.rows {
+		if r.node.Kind == "project" {
+			all[r.node.ID] = true
+		}
+	}
+	targets, _ := gitlabapi.ResolveTargets(m.roots, m.assignmentPaths(), all)
+	return targets
+}
+
+func descendantProjectIDs(n *gitlabapi.Node) []int64 {
+	var ids []int64
+	for _, c := range n.Children {
+		if c.Kind == "project" {
+			ids = append(ids, c.ID)
+		} else {
+			ids = append(ids, descendantProjectIDs(c)...)
+		}
+	}
+	return ids
+}
+
+func (m *model) startRun() (tea.Model, tea.Cmd) {
+	if len(m.namespaces) == 0 {
+		m.err = errNoNamespaces
+		return m, nil
+	}
+	targets, unmapped := gitlabapi.ResolveTargets(m.roots, m.assignmentPaths(), m.selected)
+	if len(unmapped) > 0 {
+		m.err = fmt.Errorf("%d selektierte(s) Projekt(e) ohne Ziel-Namespace — setze ein Ziel (auch auf Gruppen-Ebene möglich)", len(unmapped))
+		return m, nil
+	}
+	var items []migrate.Item
+	for _, r := range m.rows {
+		if r.node.Kind != "project" || !m.selected[r.node.ID] {
+			continue
+		}
+		items = append(items, migrate.Item{
+			Node:            r.node,
+			TargetNamespace: targets[r.node.ID],
+			Force:           m.forced[r.node.ID],
+		})
+	}
+	if len(items) == 0 {
+		m.err = errNothingSelected
+		return m, nil
+	}
+
+	// Dry run: show the resolved plan, persist nothing, touch nothing.
+	if m.dryRun {
+		m.dryItems = items
+		m.screen = screenDryRun
+		return m, nil
+	}
+	m.persistSession()
+
+	workDir, _ := os.MkdirTemp("", "gitlab-copy-run-")
+	plan := migrate.Plan{
+		Source:     m.session.Source,
+		Target:     m.session.Target,
+		Options:    m.session.Options,
+		Items:      items,
+		WorkDir:    workDir,
+		OldBaseURL: m.session.Source.URL,
+		NewBaseURL: m.session.Target.URL,
+		ExtraPaths: m.session.PathMap,
+		Roots:      m.roots,
+	}
+	m.events = make(chan tea.Msg, 128)
+	m.logs = nil
+	m.running = true
+	m.screen = screenRun
+	return m, tea.Batch(startRunCmd(plan, m.events), waitEvent(m.events), m.spin.Tick)
+}
+
+func (m *model) persistSession() {
+	var sel []int64
+	for id, on := range m.selected {
+		if on {
+			sel = append(sel, id)
+		}
+	}
+	sort.Slice(sel, func(i, j int) bool { return sel[i] < sel[j] })
+	var forced []int64
+	for id, on := range m.forced {
+		if on && m.selected[id] {
+			forced = append(forced, id)
+		}
+	}
+	sort.Slice(forced, func(i, j int) bool { return forced[i] < forced[j] })
+	m.session.Selected = sel
+	m.session.Assignments = m.assignmentPaths()
+	m.session.Force = forced
+	if m.session.Name == "" {
+		m.session.Name = deriveName(m.session.Source.URL, m.session.Target.URL)
+	}
+	_ = config.Save(&m.session, time.Now())
+}
+
+// persistPathMap merges the just-migrated repos into the session's path map so
+// later runs can rewrite references to them.
+func (m *model) persistPathMap() {
+	if m.session.PathMap == nil {
+		m.session.PathMap = map[string]string{}
+	}
+	for old, neu := range migrate.RecordPathMappings(m.results) {
+		m.session.PathMap[old] = neu
+	}
+	_ = config.Save(&m.session, time.Now())
+}
+
+// --- run -----------------------------------------------------------------
+
+func (m *model) updateRun(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case migrate.Event:
+		m.appendEvent(msg)
+		return m, waitEvent(m.events)
+	case runDoneMsg:
+		m.running = false
+		m.results = msg.results
+		m.persistPathMap()
+		m.screen = screenDone
+		return m, nil
+	case tea.KeyMsg:
+		if s := msg.String(); s == "ctrl+c" || s == "q" {
+			return m, tea.Quit
+		}
+	}
+	var cmd tea.Cmd
+	m.spin, cmd = m.spin.Update(msg)
+	return m, cmd
+}
+
+func (m *model) appendEvent(ev migrate.Event) {
+	switch ev.Type {
+	case "project_start":
+		m.logs = append(m.logs, "▶ "+ev.Project)
+	case "log":
+		m.logs = append(m.logs, "    "+ev.Message)
+	case "project_done":
+		if ev.Result != nil {
+			m.logs = append(m.logs, "  "+statusGlyph(ev.Result.Status)+" "+ev.Project+" "+resultDetail(*ev.Result))
+		}
+	}
+	m.logView.SetContent(joinLines(m.logs))
+	m.logView.GotoBottom()
+}
+
+func (m *model) updateDryRun(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyMsg); ok {
+		switch k.String() {
+		case "ctrl+c", "q":
+			return m, tea.Quit
+		case "b", "esc":
+			m.screen = screenMap
+		}
+	}
+	return m, nil
+}
+
+func (m *model) updateDone(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if k, ok := msg.(tea.KeyMsg); ok {
+		switch k.String() {
+		case "ctrl+c", "q", "enter":
+			return m, tea.Quit
+		case "b":
+			m.screen = screenMap
+		}
+	}
+	return m, nil
+}

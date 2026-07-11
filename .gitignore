@@ -1,0 +1,19 @@
+# Compiled binary (produced by `go build -o gitlab-copy-tool .`)
+/gitlab-copy-tool
+# Any other build outputs
+/dist/
+
+# Go test / coverage artifacts
+*.test
+*.out
+coverage.*
+
+# Local Claude Code settings (machine-specific)
+.claude/settings.local.json
+
+# macOS
+.DS_Store
+
+# Editor
+.idea/
+.vscode/

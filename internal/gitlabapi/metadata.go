@@ -1,0 +1,175 @@
+package gitlabapi
+
+import (
+	"fmt"
+
+	gitlab "gitlab.com/gitlab-org/api/client-go"
+)
+
+// The functions below are best-effort. Callers (the migration engine) treat
+// any returned error as a warning, never as a hard failure.
+
+// CopyLabels copies project labels from src to tgt.
+func CopyLabels(src, tgt *Client, srcPID, tgtPID int64) error {
+	opt := &gitlab.ListLabelsOptions{ListOptions: gitlab.ListOptions{PerPage: 100}}
+	for {
+		labels, resp, err := src.GL.Labels.ListLabels(srcPID, opt)
+		if err != nil {
+			return err
+		}
+		for _, l := range labels {
+			_, _, cerr := tgt.GL.Labels.CreateLabel(tgtPID, &gitlab.CreateLabelOptions{
+				Name:        gitlab.Ptr(l.Name),
+				Color:       gitlab.Ptr(l.Color),
+				Description: gitlab.Ptr(l.Description),
+			})
+			// Ignore "already exists" conflicts.
+			_ = cerr
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	return nil
+}
+
+// CopyMilestones copies project milestones from src to tgt.
+func CopyMilestones(src, tgt *Client, srcPID, tgtPID int64) error {
+	opt := &gitlab.ListMilestonesOptions{ListOptions: gitlab.ListOptions{PerPage: 100}}
+	for {
+		ms, resp, err := src.GL.Milestones.ListMilestones(srcPID, opt)
+		if err != nil {
+			return err
+		}
+		for _, m := range ms {
+			co := &gitlab.CreateMilestoneOptions{
+				Title:       gitlab.Ptr(m.Title),
+				Description: gitlab.Ptr(m.Description),
+			}
+			if m.DueDate != nil {
+				co.DueDate = m.DueDate
+			}
+			if m.StartDate != nil {
+				co.StartDate = m.StartDate
+			}
+			_, _, _ = tgt.GL.Milestones.CreateMilestone(tgtPID, co)
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	return nil
+}
+
+// CopyIssues copies open+closed issues (title, description, labels) from src
+// to tgt. It does not attempt to preserve authors, comments or numbering.
+func CopyIssues(src, tgt *Client, srcPID, tgtPID int64) error {
+	opt := &gitlab.ListProjectIssuesOptions{
+		ListOptions: gitlab.ListOptions{PerPage: 100},
+	}
+	var listed, copied int
+	for {
+		issues, resp, err := src.GL.Issues.ListProjectIssues(srcPID, opt)
+		if err != nil {
+			return err
+		}
+		for _, is := range issues {
+			listed++
+			labels := gitlab.LabelOptions(is.Labels)
+			_, _, cerr := tgt.GL.Issues.CreateIssue(tgtPID, &gitlab.CreateIssueOptions{
+				Title:       gitlab.Ptr(is.Title),
+				Description: gitlab.Ptr(is.Description),
+				Labels:      &labels,
+			})
+			if cerr == nil {
+				copied++
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	// Only an error if there were issues to copy but none went through.
+	if listed > 0 && copied == 0 {
+		return fmt.Errorf("found %d issue(s) but copied none", listed)
+	}
+	return nil
+}
+
+// CopyMergeRequests recreates the open merge requests from src on tgt. Since
+// all branches are mirrored first, the source/target branches exist. Only open
+// MRs are recreated (closed/merged ones cannot be meaningfully reconstructed).
+// Comments, authors and numbering are not preserved (best effort).
+func CopyMergeRequests(src, tgt *Client, srcPID, tgtPID int64) error {
+	opt := &gitlab.ListProjectMergeRequestsOptions{
+		ListOptions: gitlab.ListOptions{PerPage: 100},
+		State:       gitlab.Ptr("opened"),
+	}
+	var listed, copied int
+	for {
+		mrs, resp, err := src.GL.MergeRequests.ListProjectMergeRequests(srcPID, opt)
+		if err != nil {
+			return err
+		}
+		for _, mr := range mrs {
+			listed++
+			labels := gitlab.LabelOptions(mr.Labels)
+			_, _, cerr := tgt.GL.MergeRequests.CreateMergeRequest(tgtPID, &gitlab.CreateMergeRequestOptions{
+				Title:        gitlab.Ptr(mr.Title),
+				Description:  gitlab.Ptr(mr.Description),
+				SourceBranch: gitlab.Ptr(mr.SourceBranch),
+				TargetBranch: gitlab.Ptr(mr.TargetBranch),
+				Labels:       &labels,
+			})
+			if cerr == nil {
+				copied++
+			}
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	if listed > 0 && copied == 0 {
+		return fmt.Errorf("found %d open merge request(s) but copied none", listed)
+	}
+	return nil
+}
+
+// CopyCIVariables copies project-level CI/CD variables from src to tgt.
+func CopyCIVariables(src, tgt *Client, srcPID, tgtPID int64) error {
+	opt := &gitlab.ListProjectVariablesOptions{ListOptions: gitlab.ListOptions{PerPage: 100}}
+	for {
+		vars, resp, err := src.GL.ProjectVariables.ListVariables(srcPID, opt)
+		if err != nil {
+			return err
+		}
+		for _, v := range vars {
+			_, _, _ = tgt.GL.ProjectVariables.CreateVariable(tgtPID, &gitlab.CreateProjectVariableOptions{
+				Key:              gitlab.Ptr(v.Key),
+				Value:            gitlab.Ptr(v.Value),
+				VariableType:     gitlab.Ptr(v.VariableType),
+				Protected:        gitlab.Ptr(v.Protected),
+				Masked:           gitlab.Ptr(v.Masked),
+				EnvironmentScope: gitlab.Ptr(v.EnvironmentScope),
+			})
+		}
+		if resp.NextPage == 0 {
+			break
+		}
+		opt.Page = resp.NextPage
+	}
+	return nil
+}
+
+// CopySettings copies basic project settings. Visibility is handled separately
+// (reconciled on every run by the engine), so only the description is set here.
+func CopySettings(src *gitlab.Project, tgt *Client, tgtPID int64) error {
+	_, _, err := tgt.GL.Projects.EditProject(tgtPID, &gitlab.EditProjectOptions{
+		Description: gitlab.Ptr(src.Description),
+	})
+	return err
+}
