@@ -275,13 +275,9 @@ func (e *Engine) rewriteAndCommit(plan Plan, item Item, tgtProj *gitlab.Project,
 }
 
 // copyContainerRegistry copies all container images of a project to the target
-// registry via skopeo (failsafe). It is a no-op with a warning when skopeo is
-// missing or the registry is disabled on either side.
+// registry in pure Go (failsafe). It is a no-op with a warning when the registry
+// is disabled on either side.
 func (e *Engine) copyContainerRegistry(node *gitlabapi.Node, tgtProj *gitlab.Project, warn func(string, error), logf gittransport.Logf) {
-	if !containerreg.Available() {
-		warn("container-registry", fmt.Errorf("skopeo not found on PATH; skipped"))
-		return
-	}
 	images, err := e.src.ContainerImages(node.ID)
 	if err != nil {
 		warn("container-registry", err)

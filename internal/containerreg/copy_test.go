@@ -34,3 +34,9 @@ func TestTargetImage(t *testing.T) {
 		}
 	}
 }
+
+func TestRegistryHost(t *testing.T) {
+	if got := registryHost("registry.gitlab.com/grp/proj/img"); got != "registry.gitlab.com" {
+		t.Errorf("registryHost = %q", got)
+	}
+}

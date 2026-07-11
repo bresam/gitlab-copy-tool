@@ -311,7 +311,7 @@ func (m *model) renderOptions() string {
 		"3 " + mark(o.Settings) + " Settings   " +
 		"4 " + mark(o.URLRewrite) + " URL-Rewrite   " +
 		"5 " + mark(o.Releases) + " Releases   " +
-		"6 " + mark(o.ContainerRegistry) + " Container-Registry (skopeo)"
+		"6 " + mark(o.ContainerRegistry) + " Container-Registry"
 }
 
 func (m *model) viewRun() string {
