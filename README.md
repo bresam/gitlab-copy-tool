@@ -36,7 +36,9 @@ Repository content (branches/tags) travels via `git clone --mirror` →
 Prebuilt binaries for the **latest release** (no runtime dependency):
 
 - 🐧 **Linux (x86-64)** — [gitlab-copy-tool-linux-amd64](https://github.com/bresam/gitlab-copy-tool/releases/latest/download/gitlab-copy-tool-linux-amd64)
+- 🐧 **Linux (ARM64)** — [gitlab-copy-tool-linux-arm64](https://github.com/bresam/gitlab-copy-tool/releases/latest/download/gitlab-copy-tool-linux-arm64)
 - 🍎 **macOS (Apple Silicon)** — [gitlab-copy-tool-darwin-arm64](https://github.com/bresam/gitlab-copy-tool/releases/latest/download/gitlab-copy-tool-darwin-arm64)
+- 🍎 **macOS (Intel)** — [gitlab-copy-tool-darwin-amd64](https://github.com/bresam/gitlab-copy-tool/releases/latest/download/gitlab-copy-tool-darwin-amd64)
 - 🪟 **Windows (x86-64)** — [gitlab-copy-tool-windows-amd64.exe](https://github.com/bresam/gitlab-copy-tool/releases/latest/download/gitlab-copy-tool-windows-amd64.exe)
 
 On Linux/macOS make it executable (`chmod +x gitlab-copy-tool-*`). macOS may
