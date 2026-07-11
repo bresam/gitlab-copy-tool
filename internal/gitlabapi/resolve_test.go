@@ -4,6 +4,8 @@ import (
 	"reflect"
 	"sort"
 	"testing"
+
+	"github.com/bresam/gitlab-copy-tool/internal/config"
 )
 
 // tools/                (group id 1)
@@ -104,6 +106,27 @@ func TestBuildGroupHints(t *testing.T) {
 	}
 	if _, ok := hints["app"]; ok {
 		t.Errorf("projects should not be in group hints")
+	}
+}
+
+func TestResolveOptionsCascadeAndOverride(t *testing.T) {
+	roots := sampleTree()
+	baseline := config.Options{} // everything off
+	// Group "tools" enables Releases; project "runner" overrides it back off.
+	overrides := map[int64]map[int]bool{
+		1:  {config.OptReleases: true},
+		11: {config.OptReleases: false},
+	}
+	got := ResolveOptions(roots, overrides, baseline, map[int64]bool{10: true, 11: true})
+
+	if !got[10].Releases {
+		t.Errorf("deployment should inherit Releases=true from group tools")
+	}
+	if got[11].Releases {
+		t.Errorf("runner should override Releases back to false")
+	}
+	if got[10].Issues || got[10].ContainerRegistry {
+		t.Errorf("unset options should stay at baseline (false): %+v", got[10])
 	}
 }
 

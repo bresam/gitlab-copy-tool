@@ -56,10 +56,11 @@ type model struct {
 	roots       []*gitlabapi.Node
 	rows        []treeRow
 	namespaces  []gitlabapi.Namespace
-	selected    map[int64]bool   // project ID -> processed
-	assign      map[int64]int    // node ID (group/project) -> namespace index
-	forced      map[int64]bool   // project ID -> force overwrite target
-	renderTgts  map[int64]string // transient: resolved targets for rendering
+	selected    map[int64]bool         // project ID -> processed
+	assign      map[int64]int          // node ID (group/project) -> namespace index
+	forced      map[int64]bool         // project ID -> force overwrite target
+	optOverride map[int64]map[int]bool // node ID -> option index -> value (tri-state via presence)
+	renderTgts  map[int64]string       // transient: resolved targets for rendering
 	cursor      int
 
 	// run
@@ -102,6 +103,7 @@ func newModel() model {
 		selected:    map[int64]bool{},
 		assign:      map[int64]int{},
 		forced:      map[int64]bool{},
+		optOverride: map[int64]map[int]bool{},
 		transport:   [2]string{config.TransportAuto, config.TransportAuto},
 		session: config.Session{
 			Source:      config.Endpoint{Transport: config.TransportAuto},

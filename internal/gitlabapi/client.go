@@ -83,6 +83,7 @@ type Node struct {
 	DefaultBranch string
 	NamespacePath string
 	EmptyRepo     bool
+	HasContainers bool // project has at least one container-registry image
 
 	Children []*Node
 }
@@ -155,7 +156,12 @@ func (c *Client) SourceTree() ([]*Node, error) {
 		}
 		parent := byID[g.ID]
 		for _, p := range projects {
-			parent.Children = append(parent.Children, projectNode(p))
+			n := projectNode(p)
+			// Cheap pre-filter (ContainerRegistryEnabled) before the extra call.
+			if p.ContainerRegistryEnabled {
+				n.HasContainers = c.hasContainerImages(p.ID)
+			}
+			parent.Children = append(parent.Children, n)
 		}
 	}
 
@@ -339,6 +345,70 @@ func visPtr(v string) *gitlab.VisibilityValue {
 	}
 	x := gitlab.VisibilityValue(v)
 	return &x
+}
+
+// ResolveOptions computes the effective option set for each selected project by
+// walking the tree top-down: each node's overrides are applied on top of the
+// inherited set, so the nearest override (project > subgroup > group) wins and
+// the baseline applies where nothing is set. overrides maps node ID -> option
+// index -> value.
+func ResolveOptions(roots []*Node, overrides map[int64]map[int]bool, baseline config.Options, selected map[int64]bool) map[int64]config.Options {
+	out := map[int64]config.Options{}
+	var walk func(n *Node, eff config.Options)
+	walk = func(n *Node, eff config.Options) {
+		if ov, ok := overrides[n.ID]; ok {
+			for idx, v := range ov {
+				eff = eff.With(idx, v)
+			}
+		}
+		if n.Kind == "project" {
+			if selected[n.ID] {
+				out[n.ID] = eff
+			}
+			return
+		}
+		for _, c := range n.Children {
+			walk(c, eff)
+		}
+	}
+	for _, r := range roots {
+		walk(r, baseline)
+	}
+	return out
+}
+
+// EffectiveOptionsForNode returns the effective options at a single node (group
+// or project), i.e. the baseline plus every override along the path down to it.
+// Used by the UI to display a node's current settings.
+func EffectiveOptionsForNode(roots []*Node, overrides map[int64]map[int]bool, baseline config.Options, nodeID int64) config.Options {
+	var found *config.Options
+	var walk func(n *Node, eff config.Options)
+	walk = func(n *Node, eff config.Options) {
+		if ov, ok := overrides[n.ID]; ok {
+			for idx, v := range ov {
+				eff = eff.With(idx, v)
+			}
+		}
+		if n.ID == nodeID {
+			e := eff
+			found = &e
+			return
+		}
+		for _, c := range n.Children {
+			if found == nil {
+				walk(c, eff)
+			}
+		}
+	}
+	for _, r := range roots {
+		if found == nil {
+			walk(r, baseline)
+		}
+	}
+	if found != nil {
+		return *found
+	}
+	return baseline
 }
 
 // EnsureGroupPath makes sure the full group path exists on the target and

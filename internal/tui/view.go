@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/bresam/gitlab-copy-tool/internal/config"
 	"github.com/bresam/gitlab-copy-tool/internal/gitlabapi"
 	"github.com/bresam/gitlab-copy-tool/internal/migrate"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -101,14 +102,27 @@ func (m *model) viewDryRun() string {
 			force = " " + warnStyle.Render("[force]")
 		}
 		b.WriteString(okStyle.Render("•") + " " + it.Node.FullPath +
-			dimStyle.Render("  →  ") + it.TargetNamespace + "/" + it.Node.Path + force + "\n")
+			dimStyle.Render("  →  ") + it.TargetNamespace + "/" + it.Node.Path + force +
+			dimStyle.Render("  ["+optionFlags(it.Options)+"]") + "\n")
 	}
-	o := m.session.Options
-	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf(
-		"Optionen: Issues/MRs=%v CI-Vars=%v Settings=%v URL-Rewrite=%v Releases=%v Container-Reg=%v · bekannte Pfad-Remaps: %d",
-		o.Issues, o.CIVariables, o.Settings, o.URLRewrite, o.Releases, o.ContainerRegistry, len(m.session.PathMap))) + "\n\n")
+	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("Optionen je Repo als [..] gelistet · bekannte Pfad-Remaps: %d", len(m.session.PathMap))) + "\n\n")
 	b.WriteString(dimStyle.Render("b/esc zurück zum Mapping · q beenden"))
 	return b.String()
+}
+
+// optionFlags renders the enabled optional steps of an Options set as short tags.
+func optionFlags(o config.Options) string {
+	short := [config.NumOptions]string{"iss", "ci", "set", "url", "rel", "reg"}
+	var on []string
+	for i := 0; i < config.NumOptions; i++ {
+		if o.Get(i) {
+			on = append(on, short[i])
+		}
+	}
+	if len(on) == 0 {
+		return "keine"
+	}
+	return strings.Join(on, ",")
 }
 
 func (m *model) viewSession() string {
@@ -211,7 +225,7 @@ func (m *model) viewMap() string {
 }
 
 func (m *model) visibleRows() int {
-	h := m.height - 13
+	h := m.height - 14
 	if h < 5 {
 		h = 5
 	}
@@ -297,25 +311,36 @@ func (m *model) groupBox(n *gitlabapi.Node) string {
 	}
 }
 
+// renderOptions shows the optional-step toggles for the highlighted node.
+// Values are the effective ones (baseline + inherited overrides); an option set
+// explicitly on this node is highlighted and marked "*", inherited ones are dim.
 func (m *model) renderOptions() string {
-	o := m.session.Options
-	mark := func(b bool) string {
-		if b {
-			return okStyle.Render("[x]")
-		}
-		return "[ ]"
+	if len(m.rows) == 0 {
+		return ""
 	}
-	// Two lines so all six fit within a normal terminal width (Bubble Tea
-	// truncates over-long single lines, which used to hide options 5 and 6).
-	line1 := dimStyle.Render("Optionen (failsafe):  ") +
-		"1 " + mark(o.Issues) + " Issues/MRs   " +
-		"2 " + mark(o.CIVariables) + " CI-Vars   " +
-		"3 " + mark(o.Settings) + " Settings"
-	line2 := "                      " +
-		"4 " + mark(o.URLRewrite) + " URL-Rewrite   " +
-		"5 " + mark(o.Releases) + " Releases   " +
-		"6 " + mark(o.ContainerRegistry) + " Container-Registry"
-	return line1 + "\n" + line2
+	n := m.rows[m.cursor].node
+	eff := gitlabapi.EffectiveOptionsForNode(m.roots, m.optOverride, m.session.Options, n.ID)
+	ov := m.optOverride[n.ID]
+
+	tok := func(i int) string {
+		box := "[ ]"
+		if eff.Get(i) {
+			box = "[x]"
+		}
+		label := fmt.Sprintf("%d %s %s", i+1, box, config.OptionLabels[i])
+		if _, set := ov[i]; set {
+			if eff.Get(i) {
+				return okStyle.Render(label) + "*"
+			}
+			return warnStyle.Render(label) + "*"
+		}
+		return dimStyle.Render(label)
+	}
+
+	header := dimStyle.Render(fmt.Sprintf("Optionen für %s (1-6 setzen; * = hier gesetzt, sonst vererbt):", n.Name))
+	line1 := tok(0) + "   " + tok(1) + "   " + tok(2)
+	line2 := tok(3) + "   " + tok(4) + "   " + tok(5)
+	return header + "\n" + line1 + "\n" + line2
 }
 
 func (m *model) viewRun() string {

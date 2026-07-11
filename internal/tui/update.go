@@ -88,6 +88,7 @@ func (m *model) updateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.selected = map[int64]bool{}
 			m.assign = map[int64]int{}
 			m.forced = map[int64]bool{}
+			m.optOverride = map[int64]map[int]bool{}
 			if m.sessCursor < len(m.sessions) {
 				name := m.sessions[m.sessCursor]
 				if s, err := config.Load(name); err == nil {
@@ -296,6 +297,33 @@ func (m *model) applySavedSelection() {
 			m.assign[id] = idx
 		}
 	}
+	for id, ov := range m.session.OptionOverrides {
+		cp := make(map[int]bool, len(ov))
+		for k, v := range ov {
+			cp[k] = v
+		}
+		m.optOverride[id] = cp
+	}
+
+	// Auto-enable the container-registry option for repos that actually have
+	// images, where the baseline leaves it off and the user hasn't set it.
+	for _, r := range m.rows {
+		n := r.node
+		if n.Kind != "project" || !n.HasContainers {
+			continue
+		}
+		if m.session.Options.Get(config.OptContainerRegistry) {
+			continue // already on by baseline
+		}
+		ov := m.optOverride[n.ID]
+		if ov == nil {
+			ov = map[int]bool{}
+			m.optOverride[n.ID] = ov
+		}
+		if _, set := ov[config.OptContainerRegistry]; !set {
+			ov[config.OptContainerRegistry] = true
+		}
+	}
 }
 
 // --- mapping -------------------------------------------------------------
@@ -330,17 +358,17 @@ func (m *model) updateMap(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case "N":
 		m.setAll(false)
 	case "1":
-		m.session.Options.Issues = !m.session.Options.Issues
+		m.cycleOption(config.OptIssues)
 	case "2":
-		m.session.Options.CIVariables = !m.session.Options.CIVariables
+		m.cycleOption(config.OptCIVariables)
 	case "3":
-		m.session.Options.Settings = !m.session.Options.Settings
+		m.cycleOption(config.OptSettings)
 	case "4":
-		m.session.Options.URLRewrite = !m.session.Options.URLRewrite
+		m.cycleOption(config.OptURLRewrite)
 	case "5":
-		m.session.Options.Releases = !m.session.Options.Releases
+		m.cycleOption(config.OptReleases)
 	case "6":
-		m.session.Options.ContainerRegistry = !m.session.Options.ContainerRegistry
+		m.cycleOption(config.OptContainerRegistry)
 	case "f":
 		m.toggleForce(m.cursor)
 	case "ctrl+s", "enter":
@@ -369,6 +397,32 @@ func (m *model) toggleRow(i int) {
 	}
 	for _, id := range ids {
 		m.selected[id] = anyOff
+	}
+}
+
+// cycleOption cycles the option override of the highlighted node through
+// inherit → on → off → inherit. Setting it on a group cascades to descendants.
+func (m *model) cycleOption(idx int) {
+	if m.cursor < 0 || m.cursor >= len(m.rows) {
+		return
+	}
+	id := m.rows[m.cursor].node.ID
+	ov := m.optOverride[id]
+	if ov == nil {
+		ov = map[int]bool{}
+		m.optOverride[id] = ov
+	}
+	cur, set := ov[idx]
+	switch {
+	case !set:
+		ov[idx] = true // inherit → on
+	case cur:
+		ov[idx] = false // on → off
+	default:
+		delete(ov, idx) // off → inherit
+		if len(ov) == 0 {
+			delete(m.optOverride, id)
+		}
 	}
 }
 
@@ -481,6 +535,7 @@ func (m *model) startRun() (tea.Model, tea.Cmd) {
 		m.err = fmt.Errorf("%d selektierte(s) Projekt(e) ohne Ziel-Namespace — setze ein Ziel (auch auf Gruppen-Ebene möglich)", len(unmapped))
 		return m, nil
 	}
+	optMap := gitlabapi.ResolveOptions(m.roots, m.optOverride, m.session.Options, m.selected)
 	var items []migrate.Item
 	for _, r := range m.rows {
 		if r.node.Kind != "project" || !m.selected[r.node.ID] {
@@ -490,6 +545,7 @@ func (m *model) startRun() (tea.Model, tea.Cmd) {
 			Node:            r.node,
 			TargetNamespace: targets[r.node.ID],
 			Force:           m.forced[r.node.ID],
+			Options:         optMap[r.node.ID],
 		})
 	}
 	if len(items) == 0 {
@@ -542,6 +598,7 @@ func (m *model) persistSession() {
 	m.session.Selected = sel
 	m.session.Assignments = m.assignmentPaths()
 	m.session.Force = forced
+	m.session.OptionOverrides = m.optOverride
 	if m.session.Name == "" {
 		m.session.Name = deriveName(m.session.Source.URL, m.session.Target.URL)
 	}

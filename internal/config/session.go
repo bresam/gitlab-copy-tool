@@ -44,6 +44,60 @@ type Options struct {
 	ContainerRegistry bool `json:"container_registry"`
 }
 
+// Option indices (order shown in the UI as keys 1-6).
+const (
+	OptIssues = iota
+	OptCIVariables
+	OptSettings
+	OptURLRewrite
+	OptReleases
+	OptContainerRegistry
+	NumOptions
+)
+
+// OptionLabels are the short labels for each option index.
+var OptionLabels = [NumOptions]string{
+	"Issues/MRs", "CI-Vars", "Settings", "URL-Rewrite", "Releases", "Container-Registry",
+}
+
+// Get returns the option value at index i.
+func (o Options) Get(i int) bool {
+	switch i {
+	case OptIssues:
+		return o.Issues
+	case OptCIVariables:
+		return o.CIVariables
+	case OptSettings:
+		return o.Settings
+	case OptURLRewrite:
+		return o.URLRewrite
+	case OptReleases:
+		return o.Releases
+	case OptContainerRegistry:
+		return o.ContainerRegistry
+	}
+	return false
+}
+
+// With returns a copy of o with option index i set to v.
+func (o Options) With(i int, v bool) Options {
+	switch i {
+	case OptIssues:
+		o.Issues = v
+	case OptCIVariables:
+		o.CIVariables = v
+	case OptSettings:
+		o.Settings = v
+	case OptURLRewrite:
+		o.URLRewrite = v
+	case OptReleases:
+		o.Releases = v
+	case OptContainerRegistry:
+		o.ContainerRegistry = v
+	}
+	return o
+}
+
 // Session is a persisted migration configuration.
 type Session struct {
 	Name   string   `json:"name"`
@@ -65,7 +119,12 @@ type Session struct {
 	// grown on every successful run and used by the URL rewrite.
 	PathMap map[string]string `json:"path_map"`
 
+	// Options is the baseline (run-wide default) for the optional steps.
 	Options Options `json:"options"`
+	// OptionOverrides holds per-node option overrides: node ID -> option index
+	// -> value. A group override cascades to descendants; the nearest override
+	// (project > subgroup > group) wins, else the Options baseline applies.
+	OptionOverrides map[int64]map[int]bool `json:"option_overrides"`
 
 	UpdatedAt string `json:"updated_at"`
 }
@@ -78,6 +137,7 @@ func (s *Session) ClearState() {
 	s.Assignments = map[int64]string{}
 	s.Force = nil
 	s.PathMap = map[string]string{}
+	s.OptionOverrides = map[int64]map[int]bool{}
 }
 
 var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
@@ -163,6 +223,9 @@ func Load(name string) (*Session, error) {
 	if s.PathMap == nil {
 		s.PathMap = map[string]string{}
 	}
+	if s.OptionOverrides == nil {
+		s.OptionOverrides = map[int64]map[int]bool{}
+	}
 	return &s, nil
 }
 
@@ -176,6 +239,9 @@ func Save(s *Session, now time.Time) error {
 	}
 	if s.PathMap == nil {
 		s.PathMap = map[string]string{}
+	}
+	if s.OptionOverrides == nil {
+		s.OptionOverrides = map[int64]map[int]bool{}
 	}
 	s.UpdatedAt = now.UTC().Format(time.RFC3339)
 	p, err := pathFor(s.Name)

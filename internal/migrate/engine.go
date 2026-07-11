@@ -39,6 +39,9 @@ type Item struct {
 	// Force overwrites the target repo even if it holds newer/divergent history
 	// (disables the existing-target guard for this project only).
 	Force bool
+	// Options are the effective per-project optional-step toggles (resolved from
+	// the baseline + per-node overrides).
+	Options config.Options
 }
 
 // Plan is the full set of work for a run.
@@ -217,7 +220,7 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 		logf("repository mirrored")
 
 		// 4. URL rewrite. (optional, failsafe)
-		if plan.Options.URLRewrite && plan.OldBaseURL != "" && plan.NewBaseURL != "" {
+		if item.Options.URLRewrite && plan.OldBaseURL != "" && plan.NewBaseURL != "" {
 			if err := e.rewriteAndCommit(plan, item, tgtProj, mres.TargetURL, workDir, logf); err != nil {
 				warn("url-rewrite", err)
 			}
@@ -225,7 +228,7 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 	}
 
 	// 5. Metadata copy. (optional, failsafe)
-	e.copyMetadata(plan, node, tgtProj, warn, logf)
+	e.copyMetadata(item.Options, node, tgtProj, warn, logf)
 
 	if len(res.Warnings) > 0 && res.Status == StatusOK {
 		res.Status = StatusWarn
@@ -362,8 +365,8 @@ func RecordPathMappings(results []ProjectResult) map[string]string {
 	return out
 }
 
-func (e *Engine) copyMetadata(plan Plan, node *gitlabapi.Node, tgtProj *gitlab.Project, warn func(string, error), logf gittransport.Logf) {
-	if plan.Options.Issues {
+func (e *Engine) copyMetadata(opts config.Options, node *gitlabapi.Node, tgtProj *gitlab.Project, warn func(string, error), logf gittransport.Logf) {
+	if opts.Issues {
 		if err := gitlabapi.CopyLabels(e.src, e.tgt, node.ID, tgtProj.ID); err != nil {
 			warn("labels", err)
 		}
@@ -381,24 +384,24 @@ func (e *Engine) copyMetadata(plan Plan, node *gitlabapi.Node, tgtProj *gitlab.P
 			logf("merge requests copied")
 		}
 	}
-	if plan.Options.Releases {
+	if opts.Releases {
 		if err := gitlabapi.CopyReleases(e.src, e.tgt, node.ID, tgtProj.ID); err != nil {
 			warn("releases", err)
 		} else {
 			logf("releases copied")
 		}
 	}
-	if plan.Options.CIVariables {
+	if opts.CIVariables {
 		if err := gitlabapi.CopyCIVariables(e.src, e.tgt, node.ID, tgtProj.ID); err != nil {
 			warn("ci-variables", err)
 		} else {
 			logf("CI variables copied")
 		}
 	}
-	if plan.Options.ContainerRegistry {
+	if opts.ContainerRegistry {
 		e.copyContainerRegistry(node, tgtProj, warn, logf)
 	}
-	if plan.Options.Settings {
+	if opts.Settings {
 		srcProj, _, err := e.src.GL.Projects.GetProject(node.ID, nil)
 		if err != nil {
 			warn("settings", err)

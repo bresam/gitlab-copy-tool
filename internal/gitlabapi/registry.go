@@ -59,6 +59,14 @@ func (c *Client) registryTags(pid, repoID int64) ([]string, error) {
 	return names, nil
 }
 
+// hasContainerImages reports whether a project has at least one container-
+// registry image (best-effort; false on error).
+func (c *Client) hasContainerImages(pid int64) bool {
+	opt := &gitlab.ListProjectRegistryRepositoriesOptions{ListOptions: gitlab.ListOptions{PerPage: 1}}
+	repos, _, err := c.GL.ContainerRegistry.ListProjectRegistryRepositories(pid, opt)
+	return err == nil && len(repos) > 0
+}
+
 // ProjectImagePrefix returns the container-registry image prefix of a project
 // (e.g. registry.gitlab.com/group/project), or "" if the registry is disabled.
 func (c *Client) ProjectImagePrefix(pid int64) (string, error) {
