@@ -211,7 +211,7 @@ func (m *model) viewMap() string {
 }
 
 func (m *model) visibleRows() int {
-	h := m.height - 12
+	h := m.height - 13
 	if h < 5 {
 		h = 5
 	}
@@ -305,13 +305,17 @@ func (m *model) renderOptions() string {
 		}
 		return "[ ]"
 	}
-	return "Optionen (failsafe):  " +
-		"1 " + mark(o.Issues) + " Issues/MRs/Labels/Milestones   " +
+	// Two lines so all six fit within a normal terminal width (Bubble Tea
+	// truncates over-long single lines, which used to hide options 5 and 6).
+	line1 := dimStyle.Render("Optionen (failsafe):  ") +
+		"1 " + mark(o.Issues) + " Issues/MRs   " +
 		"2 " + mark(o.CIVariables) + " CI-Vars   " +
-		"3 " + mark(o.Settings) + " Settings   " +
+		"3 " + mark(o.Settings) + " Settings"
+	line2 := "                      " +
 		"4 " + mark(o.URLRewrite) + " URL-Rewrite   " +
 		"5 " + mark(o.Releases) + " Releases   " +
 		"6 " + mark(o.ContainerRegistry) + " Container-Registry"
+	return line1 + "\n" + line2
 }
 
 func (m *model) viewRun() string {
