@@ -15,6 +15,7 @@ import (
 	"strings"
 
 	"github.com/bresam/gitlab-copy-tool/internal/config"
+	"github.com/bresam/gitlab-copy-tool/internal/containerreg"
 	"github.com/bresam/gitlab-copy-tool/internal/gitlabapi"
 	"github.com/bresam/gitlab-copy-tool/internal/gittransport"
 	"github.com/bresam/gitlab-copy-tool/internal/rewrite"
@@ -79,6 +80,10 @@ type Event struct {
 type Engine struct {
 	src *gitlabapi.Client
 	tgt *gitlabapi.Client
+
+	// Registry credentials, resolved lazily for the container-registry step.
+	srcCreds containerreg.Creds
+	tgtCreds containerreg.Creds
 }
 
 // NewEngine connects to both instances.
@@ -92,7 +97,17 @@ func NewEngine(plan Plan) (*Engine, error) {
 		return nil, fmt.Errorf("target client: %w", err)
 	}
 	tgt.SetGroupHints(gitlabapi.BuildGroupHints(plan.Roots))
-	return &Engine{src: src, tgt: tgt}, nil
+
+	e := &Engine{src: src, tgt: tgt}
+	// Best-effort registry credentials (username + resolved token); only used
+	// when the container-registry step is enabled.
+	if u, err := src.CurrentUsername(); err == nil {
+		e.srcCreds = containerreg.Creds{User: u, Token: config.ResolveToken(plan.Source.Token)}
+	}
+	if u, err := tgt.CurrentUsername(); err == nil {
+		e.tgtCreds = containerreg.Creds{User: u, Token: config.ResolveToken(plan.Target.Token)}
+	}
+	return e, nil
 }
 
 // Run executes the plan, emitting events. It returns all project results.
@@ -259,6 +274,58 @@ func (e *Engine) rewriteAndCommit(plan Plan, item Item, tgtProj *gitlab.Project,
 	return nil
 }
 
+// copyContainerRegistry copies all container images of a project to the target
+// registry via skopeo (failsafe). It is a no-op with a warning when skopeo is
+// missing or the registry is disabled on either side.
+func (e *Engine) copyContainerRegistry(node *gitlabapi.Node, tgtProj *gitlab.Project, warn func(string, error), logf gittransport.Logf) {
+	if !containerreg.Available() {
+		warn("container-registry", fmt.Errorf("skopeo not found on PATH; skipped"))
+		return
+	}
+	images, err := e.src.ContainerImages(node.ID)
+	if err != nil {
+		warn("container-registry", err)
+		return
+	}
+	if len(images) == 0 {
+		return
+	}
+	srcPrefix, err := e.src.ProjectImagePrefix(node.ID)
+	if err != nil || srcPrefix == "" {
+		warn("container-registry", fmt.Errorf("source image prefix unavailable"))
+		return
+	}
+	dstPrefix := tgtProj.ContainerRegistryImagePrefix
+	if dstPrefix == "" {
+		if p, perr := e.tgt.ProjectImagePrefix(tgtProj.ID); perr == nil {
+			dstPrefix = p
+		}
+	}
+	if dstPrefix == "" {
+		warn("container-registry", fmt.Errorf("target registry prefix unavailable (registry disabled?)"))
+		return
+	}
+
+	var copied, failed int
+	for _, img := range images {
+		dstImage := containerreg.TargetImage(img.Location, srcPrefix, dstPrefix)
+		for _, tag := range img.Tags {
+			if err := containerreg.Copy(img.Location, dstImage, tag, e.srcCreds, e.tgtCreds); err != nil {
+				failed++
+				logf("container: %s:%s failed: %v", img.Location, tag, err)
+				continue
+			}
+			copied++
+		}
+	}
+	if copied > 0 {
+		logf("container images copied: %d tag(s)", copied)
+	}
+	if failed > 0 {
+		warn("container-registry", fmt.Errorf("%d image tag(s) failed to copy", failed))
+	}
+}
+
 // firstSegment returns the first path segment of a namespace path, i.e. the
 // account/top-level group (e.g. "example-org/tools" -> "example-org").
 func firstSegment(nsPath string) string {
@@ -331,6 +398,9 @@ func (e *Engine) copyMetadata(plan Plan, node *gitlabapi.Node, tgtProj *gitlab.P
 		} else {
 			logf("CI variables copied")
 		}
+	}
+	if plan.Options.ContainerRegistry {
+		e.copyContainerRegistry(node, tgtProj, warn, logf)
 	}
 	if plan.Options.Settings {
 		srcProj, _, err := e.src.GL.Projects.GetProject(node.ID, nil)

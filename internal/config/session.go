@@ -36,11 +36,12 @@ type Endpoint struct {
 
 // Options toggles the optional (failsafe) migration steps.
 type Options struct {
-	Issues      bool `json:"issues"`
-	CIVariables bool `json:"ci_variables"`
-	Settings    bool `json:"settings"`
-	URLRewrite  bool `json:"url_rewrite"`
-	Releases    bool `json:"releases"`
+	Issues            bool `json:"issues"`
+	CIVariables       bool `json:"ci_variables"`
+	Settings          bool `json:"settings"`
+	URLRewrite        bool `json:"url_rewrite"`
+	Releases          bool `json:"releases"`
+	ContainerRegistry bool `json:"container_registry"`
 }
 
 // Session is a persisted migration configuration.

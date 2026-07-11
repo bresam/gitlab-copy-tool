@@ -339,6 +339,8 @@ func (m *model) updateMap(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.session.Options.URLRewrite = !m.session.Options.URLRewrite
 	case "5":
 		m.session.Options.Releases = !m.session.Options.Releases
+	case "6":
+		m.session.Options.ContainerRegistry = !m.session.Options.ContainerRegistry
 	case "f":
 		m.toggleForce(m.cursor)
 	case "ctrl+s", "enter":
