@@ -132,9 +132,13 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 		logf("warning: %s: %v", context, err)
 	}
 
+	// Target visibility: source "internal" has no SaaS equivalent and must not
+	// become public — it maps to "private".
+	wantVis := gitlabapi.TargetVisibility(node.Visibility)
+
 	// 1. Ensure the target project exists (resolving/creating the namespace —
 	//    group path or personal namespace). (hard)
-	tgtProj, existed, err := e.tgt.EnsureProject(item.TargetNamespace, node.Path, node.Name, node.Visibility)
+	tgtProj, existed, err := e.tgt.EnsureProject(item.TargetNamespace, node.Path, node.Name, wantVis)
 	if err != nil {
 		return fail(err)
 	}
@@ -146,12 +150,12 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 
 	// Reconcile repo visibility to match the source on every run (failsafe:
 	// warns if e.g. public is not allowed under a private target namespace).
-	if node.Visibility != "" && string(tgtProj.Visibility) != node.Visibility {
-		if err := e.tgt.SetProjectVisibility(tgtProj.ID, node.Visibility); err != nil {
+	if wantVis != "" && string(tgtProj.Visibility) != wantVis {
+		if err := e.tgt.SetProjectVisibility(tgtProj.ID, wantVis); err != nil {
 			warn("visibility", err)
 		} else {
-			logf("visibility set to %s", node.Visibility)
-			tgtProj.Visibility = gitlab.VisibilityValue(node.Visibility)
+			logf("visibility set to %s", wantVis)
+			tgtProj.Visibility = gitlab.VisibilityValue(wantVis)
 		}
 	}
 

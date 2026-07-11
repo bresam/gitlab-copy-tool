@@ -31,6 +31,17 @@ type GroupInfo struct {
 	Visibility string
 }
 
+// TargetVisibility maps a source visibility to the value used on the target.
+// GitLab SaaS (gitlab.com) has no "internal" level, and an internal repo must
+// never become public, so "internal" maps to "private". Other values pass
+// through unchanged.
+func TargetVisibility(v string) string {
+	if v == "internal" {
+		return "private"
+	}
+	return v
+}
+
 // SetGroupHints installs the source-group name/visibility lookup on the client.
 func (c *Client) SetGroupHints(h map[string]GroupInfo) { c.groupHints = h }
 
@@ -41,7 +52,7 @@ func BuildGroupHints(roots []*Node) map[string]GroupInfo {
 	var walk func(n *Node)
 	walk = func(n *Node) {
 		if n.Kind == "group" {
-			hints[n.Path] = GroupInfo{Name: n.Name, Visibility: n.Visibility}
+			hints[n.Path] = GroupInfo{Name: n.Name, Visibility: TargetVisibility(n.Visibility)}
 		}
 		for _, c := range n.Children {
 			walk(c)

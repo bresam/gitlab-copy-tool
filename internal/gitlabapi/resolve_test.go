@@ -66,6 +66,27 @@ func TestResolveTargetsSubgroupOverride(t *testing.T) {
 	}
 }
 
+func TestTargetVisibility(t *testing.T) {
+	cases := map[string]string{
+		"internal": "private", // no SaaS equivalent, must not be public
+		"private":  "private",
+		"public":   "public",
+		"":         "",
+	}
+	for in, want := range cases {
+		if got := TargetVisibility(in); got != want {
+			t.Errorf("TargetVisibility(%q) = %q, want %q", in, got, want)
+		}
+	}
+}
+
+func TestBuildGroupHintsMapsInternal(t *testing.T) {
+	roots := []*Node{{ID: 1, Kind: "group", Name: "Team", Path: "team", FullPath: "team", Visibility: "internal"}}
+	if got := BuildGroupHints(roots)["team"].Visibility; got != "private" {
+		t.Errorf("group internal visibility should map to private, got %q", got)
+	}
+}
+
 func TestBuildGroupHints(t *testing.T) {
 	roots := []*Node{{
 		ID: 1, Kind: "group", Name: "Public", Path: "pub", FullPath: "pub", Visibility: "public",
@@ -78,8 +99,8 @@ func TestBuildGroupHints(t *testing.T) {
 	if got := hints["pub"]; got.Name != "Public" || got.Visibility != "public" {
 		t.Errorf(`hints["pub"] = %+v, want {Public public}`, got)
 	}
-	if got := hints["tools"]; got.Name != "Tools" || got.Visibility != "internal" {
-		t.Errorf(`hints["tools"] = %+v, want {Tools internal}`, got)
+	if got := hints["tools"]; got.Name != "Tools" || got.Visibility != "private" {
+		t.Errorf(`hints["tools"] = %+v, want {Tools private} (internal maps to private)`, got)
 	}
 	if _, ok := hints["app"]; ok {
 		t.Errorf("projects should not be in group hints")

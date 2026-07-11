@@ -94,10 +94,12 @@ be set per repo **or at the group level** (inherited by the substructure).
 - **Group creation:** missing target (sub)groups are created automatically —
   with the **exact name and path slug of the source** (a group named "Public"
   with path "pub" stays that way).
-- **Visibility replication:** private/internal/public of source groups and repos
-  is replicated on the target and reconciled on **every** run (groups are only
-  raised, never lowered). Where GitLab forbids it (e.g. public under a private
-  target account), a warning is emitted instead of a hard failure.
+- **Visibility replication:** private/public of source groups and repos is
+  replicated on the target and reconciled on **every** run (groups are only
+  raised, never lowered). GitLab SaaS has no `internal` level, so source
+  **`internal` maps to `private`** (never public). Where GitLab forbids a level
+  (e.g. public under a private target account), a warning is emitted instead of
+  a hard failure.
 
 ### Metadata (optional, failsafe)
 These steps are toggleable; if one fails you only get a **warning** — the repo
