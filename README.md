@@ -227,7 +227,7 @@ export SRC_TOKEN=glpat-…   TGT_TOKEN=glpat-…
 | `space` | (De)select item (a group toggles all its children) |
 | `enter` / `t` | Open the **target picker** for the highlighted node: type to filter or enter a free path; choose from existing target namespaces and source-derived suggestions (the repo's own path bottom-up, and that path under each existing account). `ctrl+u` clears the target |
 | `←/→` | Quick-cycle the target through the candidate list (on a group it cascades, on a repo only there) |
-| `f` | Toggle force-overwrite for this repo |
+| `f` | Toggle force for this repo — deletes & recreates the target for a clean re-transfer (also fixes pushes rejected by a protected default branch) |
 | `a` / `N` | Select all / none |
 | `1`–`6` | Cycle the highlighted node's option (inherit → on → off) — Issues/MRs, CI vars, Settings, URL rewrite, Releases, Container registry. On a group it cascades to the substructure |
 | `ctrl+s` | **Save** the session config (no migration) |
@@ -283,8 +283,10 @@ Before overwriting an already existing target repo, the tool compares the refs:
 - Target **has nothing newer** → fully overwrite (force+prune push of branches/tags).
 - Target **has newer/divergent** commits or its own branches → **skipped with a
   reason** (in the log and the summary).
-- With `f` (force) per repo it is overwritten anyway — then reported as a
-  **warning** stating what was overwritten.
+- With `f` (**force**) per repo, the tool **deletes and recreates** the target
+  project for a clean re-transfer. This is also the reliable way to re-push when
+  the target's default branch is protected (a force-push to a protected branch is
+  rejected by GitLab; pushing into a fresh repo is not).
 
 ---
 

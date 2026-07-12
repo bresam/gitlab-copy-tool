@@ -8,6 +8,7 @@ import (
 	"net/url"
 	"sort"
 	"strings"
+	"time"
 
 	"github.com/bresam/gitlab-copy-tool/internal/config"
 	gitlab "gitlab.com/gitlab-org/api/client-go"
@@ -517,6 +518,33 @@ func (c *Client) createGroup(seg, name string, parentID int64, visibility string
 		return 0, err
 	}
 	return g.ID, nil
+}
+
+// DeleteProjectAndWait deletes the project at fullPath (if it exists) and waits
+// until its path is free again (so it can be recreated), up to timeout. Used by
+// the per-repo force option for a clean recreate.
+func (c *Client) DeleteProjectAndWait(fullPath string, timeout time.Duration) error {
+	p, err := c.FindProject(fullPath)
+	if err != nil {
+		return err
+	}
+	if p == nil {
+		return nil // nothing to delete
+	}
+	if _, err := c.GL.Projects.DeleteProject(p.ID, nil); err != nil {
+		return err
+	}
+	deadline := time.Now().Add(timeout)
+	for {
+		got, err := c.FindProject(fullPath)
+		if err == nil && got == nil {
+			return nil // path is free
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("target project %q still present after delete (deferred deletion?); path not free within %s", fullPath, timeout)
+		}
+		time.Sleep(2 * time.Second)
+	}
 }
 
 // SetProjectVisibility sets a project's visibility (private/internal/public).

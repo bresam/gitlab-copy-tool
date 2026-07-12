@@ -124,13 +124,21 @@ func Mirror(spec Spec, logf Logf) (Result, error) {
 		}
 	}
 
-	// 4. Push branches and tags only (force + prune), NOT GitLab-internal hidden
-	//    refs. A `git push --mirror` would also try to push refs/merge-requests/*,
-	//    refs/pipelines/*, refs/keep-around/* etc. from the source mirror, which
-	//    GitLab rejects server-side ("pre-receive hook declined").
+	// 4. Push branches and tags only — NOT GitLab-internal hidden refs
+	//    (refs/merge-requests/*, refs/pipelines/*, refs/keep-around/*), which a
+	//    `git push --mirror` would include and GitLab rejects server-side.
+	//    --force is used only when overwriting is intended: a plain push allows
+	//    fast-forward updates even to a protected default branch, while a force
+	//    push to a protected branch would be rejected ("pre-receive hook
+	//    declined"). Force overwrites are instead handled by recreating the
+	//    target project (see the engine), so here force is a rare fallback.
+	args := []string{"push"}
+	if spec.Force {
+		args = append(args, "--force")
+	}
+	args = append(args, targetURL, "refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*")
 	logf("push branches+tags via %s", redact(targetURL))
-	if _, err := runGit(dir, "push", "--force", "--prune", targetURL,
-		"refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"); err != nil {
+	if _, err := runGit(dir, args...); err != nil {
 		return res, fmt.Errorf("push: %w", err)
 	}
 	res.Pushed = true

@@ -13,6 +13,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/bresam/gitlab-copy-tool/internal/config"
 	"github.com/bresam/gitlab-copy-tool/internal/containerreg"
@@ -194,6 +195,21 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 	// become public — it maps to "private".
 	wantVis := gitlabapi.TargetVisibility(node.Visibility)
 
+	// Force = clean slate: delete an existing target project and recreate it, so
+	// the push goes into a fresh repo (avoids force-pushing a protected default
+	// branch, which GitLab rejects server-side).
+	if item.Force {
+		full := item.TargetNamespace + "/" + node.Path
+		if p, ferr := e.tgt.FindProject(full); ferr == nil && p != nil {
+			logf("force: deleting existing target project for a clean recreate")
+			if err := e.tgt.DeleteProjectAndWait(full, 90*time.Second); err != nil {
+				warn("force-delete", err)
+			} else {
+				logf("force: target deleted")
+			}
+		}
+	}
+
 	// 1. Ensure the target project exists (resolving/creating the namespace —
 	//    group path or personal namespace). (hard)
 	tgtProj, existed, err := e.tgt.EnsureProject(item.TargetNamespace, node.Path, node.Name, wantVis)
@@ -374,11 +390,13 @@ func (e *Engine) copyContainerRegistry(node *gitlabapi.Node, tgtProj *gitlab.Pro
 			if progressf != nil {
 				progressf(done, total, "copying "+short)
 			}
+			logf("container [%d/%d] copying %s …", done+1, total, short)
 			if err := containerreg.Copy(img.Location, dstImage, tag, e.srcCreds, e.tgtCreds); err != nil {
 				failed++
-				logf("container: %s failed: %v", short, err)
+				logf("container [%d/%d] %s FAILED: %v", done+1, total, short, err)
 			} else {
 				copied++
+				logf("container [%d/%d] %s ✓", done+1, total, short)
 			}
 			done++
 			if progressf != nil {

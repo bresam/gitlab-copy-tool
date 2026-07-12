@@ -9,6 +9,7 @@ package containerreg
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 	"time"
 
@@ -18,7 +19,18 @@ import (
 
 // copyTimeout bounds a single image:tag copy so a broken or hanging tag on the
 // source cannot block the whole run.
-const copyTimeout = 10 * time.Minute
+const copyTimeout = 5 * time.Minute
+
+// boundedTransport is an HTTP transport with finite timeouts, so a stalled
+// registry request fails instead of hanging the copy indefinitely.
+func boundedTransport() http.RoundTripper {
+	t := http.DefaultTransport.(*http.Transport).Clone()
+	t.TLSHandshakeTimeout = 20 * time.Second
+	t.ResponseHeaderTimeout = 60 * time.Second
+	t.ExpectContinueTimeout = 10 * time.Second
+	t.IdleConnTimeout = 60 * time.Second
+	return t
+}
 
 // Creds are registry credentials (GitLab: username + a token with registry
 // access, e.g. a PAT with the api or read_registry/write_registry scope).
@@ -72,7 +84,11 @@ func Copy(srcImage, dstImage, tag string, src, dst Creds) error {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), copyTimeout)
 	defer cancel()
-	opts := []crane.Option{crane.WithAuthFromKeychain(kc), crane.WithContext(ctx)}
+	opts := []crane.Option{
+		crane.WithAuthFromKeychain(kc),
+		crane.WithContext(ctx),
+		crane.WithTransport(boundedTransport()),
+	}
 
 	// Fast pre-check: a broken/empty source tag (no readable manifest) is
 	// skipped with a clear error instead of hanging the copy.
