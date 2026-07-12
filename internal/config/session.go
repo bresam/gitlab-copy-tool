@@ -125,6 +125,11 @@ type Session struct {
 	// -> value. A group override cascades to descendants; the nearest override
 	// (project > subgroup > group) wins, else the Options baseline applies.
 	OptionOverrides map[int64]map[int]bool `json:"option_overrides"`
+	// Transferred records, per successfully migrated project ID, a fingerprint
+	// of the effective config it was transferred with. A repo is skipped on the
+	// next run when this fingerprint is unchanged and the source has no new
+	// content.
+	Transferred map[int64]string `json:"transferred"`
 
 	UpdatedAt string `json:"updated_at"`
 }
@@ -138,6 +143,7 @@ func (s *Session) ClearState() {
 	s.Force = nil
 	s.PathMap = map[string]string{}
 	s.OptionOverrides = map[int64]map[int]bool{}
+	s.Transferred = map[int64]string{}
 }
 
 var envRef = regexp.MustCompile(`^\$\{([A-Za-z_][A-Za-z0-9_]*)\}$`)
@@ -226,6 +232,9 @@ func Load(name string) (*Session, error) {
 	if s.OptionOverrides == nil {
 		s.OptionOverrides = map[int64]map[int]bool{}
 	}
+	if s.Transferred == nil {
+		s.Transferred = map[int64]string{}
+	}
 	return &s, nil
 }
 
@@ -242,6 +251,9 @@ func Save(s *Session, now time.Time) error {
 	}
 	if s.OptionOverrides == nil {
 		s.OptionOverrides = map[int64]map[int]bool{}
+	}
+	if s.Transferred == nil {
+		s.Transferred = map[int64]string{}
 	}
 	s.UpdatedAt = now.UTC().Format(time.RFC3339)
 	p, err := pathFor(s.Name)

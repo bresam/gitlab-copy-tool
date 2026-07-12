@@ -562,16 +562,18 @@ func (m *model) startRun() (tea.Model, tea.Cmd) {
 	m.persistSession()
 
 	workDir, _ := os.MkdirTemp("", "gitlab-copy-run-")
+	m.runWorkDir = workDir
 	plan := migrate.Plan{
-		Source:     m.session.Source,
-		Target:     m.session.Target,
-		Options:    m.session.Options,
-		Items:      items,
-		WorkDir:    workDir,
-		OldBaseURL: m.session.Source.URL,
-		NewBaseURL: m.session.Target.URL,
-		ExtraPaths: m.session.PathMap,
-		Roots:      m.roots,
+		Source:           m.session.Source,
+		Target:           m.session.Target,
+		Options:          m.session.Options,
+		Items:            items,
+		WorkDir:          workDir,
+		OldBaseURL:       m.session.Source.URL,
+		NewBaseURL:       m.session.Target.URL,
+		ExtraPaths:       m.session.PathMap,
+		Roots:            m.roots,
+		LastFingerprints: m.session.Transferred,
 	}
 	m.events = make(chan tea.Msg, 128)
 	m.logs = nil
@@ -614,6 +616,12 @@ func (m *model) persistPathMap() {
 	for old, neu := range migrate.RecordPathMappings(m.results) {
 		m.session.PathMap[old] = neu
 	}
+	if m.session.Transferred == nil {
+		m.session.Transferred = map[int64]string{}
+	}
+	for id, fp := range migrate.RecordTransferred(m.results) {
+		m.session.Transferred[id] = fp
+	}
 	_ = config.Save(&m.session, time.Now())
 }
 
@@ -628,6 +636,10 @@ func (m *model) updateRun(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.running = false
 		m.results = msg.results
 		m.persistPathMap()
+		if m.runWorkDir != "" {
+			_ = os.RemoveAll(m.runWorkDir)
+			m.runWorkDir = ""
+		}
 		m.screen = screenDone
 		return m, nil
 	case tea.KeyMsg:

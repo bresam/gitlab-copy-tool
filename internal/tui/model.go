@@ -64,12 +64,13 @@ type model struct {
 	cursor      int
 
 	// run
-	events   chan tea.Msg
-	logs     []string
-	logView  viewport.Model
-	results  []migrate.ProjectResult
-	running  bool
-	dryItems []migrate.Item // resolved plan shown in dry-run mode
+	events     chan tea.Msg
+	logs       []string
+	logView    viewport.Model
+	results    []migrate.ProjectResult
+	running    bool
+	runWorkDir string         // temp run dir, removed when the run finishes
+	dryItems   []migrate.Item // resolved plan shown in dry-run mode
 }
 
 type treeRow struct {

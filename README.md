@@ -134,6 +134,10 @@ extra commit on the default branch:
   runs also correctly rewrite references to previously migrated repos.
 
 ### Convenience
+- **Incremental re-runs:** an already-transferred repo is **skipped** (`unchanged`)
+  unless its config changed (target, options, force) **or** the source has new
+  commits/branches. Each repo is cloned into a temp dir, mirror-pushed, and the
+  temp dir is removed immediately — at most ~one repo is on disk at a time.
 - **Sessions:** connections, selection, mapping and options are saved and offered
   for reuse on startup.
 - **Dry run:** shows the resolved plan without pushing anything.

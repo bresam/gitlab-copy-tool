@@ -130,8 +130,10 @@ func runSession(name string, dryRun bool, pathMapFile string) error {
 		force[id] = true
 	}
 
-	// Resolve effective target namespaces (cascading group assignments).
+	// Resolve effective target namespaces (cascading group assignments) and
+	// per-project options.
 	targets, unmapped := gitlabapi.ResolveTargets(roots, sess.Assignments, selected)
+	optMap := gitlabapi.ResolveOptions(roots, sess.OptionOverrides, sess.Options, selected)
 	for _, id := range unmapped {
 		fmt.Fprintf(os.Stderr, "warning: selected project id %d has no target namespace (skipped)\n", id)
 	}
@@ -148,7 +150,7 @@ func runSession(name string, dryRun bool, pathMapFile string) error {
 		if !ok {
 			continue // unmapped (already warned)
 		}
-		items = append(items, migrate.Item{Node: node, TargetNamespace: ns, Force: force[id]})
+		items = append(items, migrate.Item{Node: node, TargetNamespace: ns, Force: force[id], Options: optMap[id]})
 	}
 	sort.Slice(items, func(i, j int) bool { return items[i].Node.FullPath < items[j].Node.FullPath })
 
@@ -183,15 +185,16 @@ func runSession(name string, dryRun bool, pathMapFile string) error {
 	}
 
 	plan := migrate.Plan{
-		Source:     sess.Source,
-		Target:     sess.Target,
-		Options:    sess.Options,
-		Items:      items,
-		WorkDir:    workDir,
-		OldBaseURL: sess.Source.URL,
-		NewBaseURL: sess.Target.URL,
-		ExtraPaths: extra,
-		Roots:      roots,
+		Source:           sess.Source,
+		Target:           sess.Target,
+		Options:          sess.Options,
+		Items:            items,
+		WorkDir:          workDir,
+		OldBaseURL:       sess.Source.URL,
+		NewBaseURL:       sess.Target.URL,
+		ExtraPaths:       extra,
+		Roots:            roots,
+		LastFingerprints: sess.Transferred,
 	}
 
 	if dryRun {
@@ -225,12 +228,19 @@ func runSession(name string, dryRun bool, pathMapFile string) error {
 			}
 		}
 	})
-	// Record the migrated repos into the session's path map for future runs.
+	// Record the migrated repos into the session's path map + transfer
+	// fingerprints for future runs.
 	if sess.PathMap == nil {
 		sess.PathMap = map[string]string{}
 	}
 	for k, v := range migrate.RecordPathMappings(results) {
 		sess.PathMap[k] = v
+	}
+	if sess.Transferred == nil {
+		sess.Transferred = map[int64]string{}
+	}
+	for id, fp := range migrate.RecordTransferred(results) {
+		sess.Transferred[id] = fp
 	}
 	_ = config.Save(sess, time.Now())
 

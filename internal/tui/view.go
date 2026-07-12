@@ -46,6 +46,8 @@ func statusGlyph(s migrate.Status) string {
 		return warnStyle.Render("!")
 	case migrate.StatusSkipped:
 		return dimStyle.Render("↷")
+	case migrate.StatusUnchanged:
+		return dimStyle.Render("=")
 	case migrate.StatusFailed:
 		return errStyle.Render("✗")
 	}
@@ -56,6 +58,8 @@ func resultDetail(r migrate.ProjectResult) string {
 	switch r.Status {
 	case migrate.StatusSkipped:
 		return dimStyle.Render("skipped: " + r.Reason)
+	case migrate.StatusUnchanged:
+		return dimStyle.Render("unchanged")
 	case migrate.StatusFailed:
 		return errStyle.Render(r.Reason)
 	case migrate.StatusWarn:

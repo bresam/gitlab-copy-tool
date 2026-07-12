@@ -83,6 +83,15 @@ func TestMirrorEndToEnd(t *testing.T) {
 		}
 	}
 
+	// 1b. Re-run with no changes -> up to date, nothing pushed/cloned.
+	res, err = Mirror(spec(false), nil)
+	if err != nil {
+		t.Fatalf("up-to-date mirror: %v", err)
+	}
+	if !res.UpToDate || res.Pushed {
+		t.Fatalf("expected UpToDate with no push, got %+v", res)
+	}
+
 	// 2. Target behind (source advanced) -> overwrite.
 	commitFile(t, src, "b.txt", "two")
 	srcSha := mainSha(t, src)

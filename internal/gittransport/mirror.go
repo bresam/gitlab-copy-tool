@@ -41,6 +41,9 @@ type Result struct {
 	Pushed  bool
 	Skipped bool
 	Reason  string
+	// UpToDate is true when the target already has exactly the same branches and
+	// tags as the source, so nothing was cloned or pushed.
+	UpToDate bool
 	// Forced is true when the target held newer/divergent history but was
 	// overwritten anyway because Force was set. Reason then carries the detail.
 	Forced bool
@@ -62,10 +65,27 @@ func Mirror(spec Spec, logf Logf) (Result, error) {
 	if logf == nil {
 		logf = func(string, ...any) {}
 	}
+	var res Result
+
+	// 1. Resolve the target and compare refs first — if the target already has
+	//    exactly the source's branches and tags, skip the clone/push entirely.
+	targetURL, targetRefs, err := resolveTarget(spec.Target, logf)
+	if err != nil {
+		return res, err
+	}
+	res.TargetURL = targetURL
+	if len(targetRefs) > 0 {
+		if srcRefs, err := lsRemoteAny(spec.Source); err == nil && refsEqual(srcRefs, targetRefs) {
+			res.UpToDate = true
+			logf("target already up to date (%d refs) — skipping clone", len(targetRefs))
+			return res, nil
+		}
+	}
+
 	dir := filepath.Join(spec.WorkDir, "mirror.git")
 	_ = os.RemoveAll(dir)
 
-	// 1. Clone --mirror from the source, trying candidate transports.
+	// 2. Clone --mirror from the source, trying candidate transports.
 	srcURLs := candidates(spec.Source)
 	var cloneErr error
 	cloned := false
@@ -80,17 +100,9 @@ func Mirror(spec Spec, logf Logf) (Result, error) {
 		break
 	}
 	if !cloned {
-		return Result{}, fmt.Errorf("clone failed: %w", cloneErr)
+		return res, fmt.Errorf("clone failed: %w", cloneErr)
 	}
-
-	res := Result{CloneDir: dir}
-
-	// 2. Pick a working target URL (first candidate that answers ls-remote).
-	targetURL, targetRefs, err := resolveTarget(spec.Target, logf)
-	if err != nil {
-		return res, err
-	}
-	res.TargetURL = targetURL
+	res.CloneDir = dir
 
 	// 3. Existing-target guard. Always evaluated when the target has refs so we
 	//    can report the reason; Force decides whether to overwrite anyway.
@@ -137,6 +149,33 @@ func resolveTarget(r Repo, logf Logf) (string, map[string]string, error) {
 		return u, refs, nil
 	}
 	return "", nil, fmt.Errorf("cannot reach target: %w", lastErr)
+}
+
+// lsRemoteAny returns the heads+tags of a repo, trying its candidate URLs.
+func lsRemoteAny(r Repo) (map[string]string, error) {
+	var lastErr error
+	for _, u := range candidates(r) {
+		refs, err := lsRemote(u)
+		if err != nil {
+			lastErr = err
+			continue
+		}
+		return refs, nil
+	}
+	return nil, lastErr
+}
+
+// refsEqual reports whether two ref maps (logical name -> sha) are identical.
+func refsEqual(a, b map[string]string) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for k, v := range a {
+		if b[k] != v {
+			return false
+		}
+	}
+	return true
 }
 
 // guard fetches the target refs into the local mirror and compares them with

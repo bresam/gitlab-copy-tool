@@ -26,10 +26,11 @@ import (
 type Status string
 
 const (
-	StatusOK      Status = "ok"
-	StatusWarn    Status = "warn"
-	StatusSkipped Status = "skipped"
-	StatusFailed  Status = "failed"
+	StatusOK        Status = "ok"
+	StatusWarn      Status = "warn"
+	StatusSkipped   Status = "skipped"
+	StatusUnchanged Status = "unchanged"
+	StatusFailed    Status = "failed"
 )
 
 // Item is one project to migrate together with its resolved target namespace.
@@ -60,15 +61,45 @@ type Plan struct {
 	// (loaded from the cumulative path map) so the URL rewrite can also fix
 	// references to repos migrated in previous sessions.
 	ExtraPaths map[string]string
+	// LastFingerprints maps a project ID to the config fingerprint it was last
+	// transferred with. A project is skipped ("unchanged") when its fingerprint
+	// is unchanged and the source has no new content.
+	LastFingerprints map[int64]string
 }
 
 // ProjectResult captures the outcome for one project.
 type ProjectResult struct {
-	Source   string
-	Target   string
-	Status   Status
-	Reason   string
-	Warnings []string
+	NodeID      int64
+	Source      string
+	Target      string
+	Status      Status
+	Reason      string
+	Warnings    []string
+	Fingerprint string // effective-config fingerprint of this run
+}
+
+// Fingerprint is a stable string of the effective per-project config; a change
+// in target namespace, force flag or any option changes it.
+func Fingerprint(it Item) string {
+	o := it.Options
+	return fmt.Sprintf("%s|f=%t|%t%t%t%t%t%t", it.TargetNamespace, it.Force,
+		o.Issues, o.CIVariables, o.Settings, o.URLRewrite, o.Releases, o.ContainerRegistry)
+}
+
+// RecordTransferred returns the project ID -> fingerprint map for projects that
+// were successfully processed (ok/warn/unchanged), for persisting into the
+// session so the next run can skip unchanged repos.
+func RecordTransferred(results []ProjectResult) map[int64]string {
+	out := map[int64]string{}
+	for _, r := range results {
+		switch r.Status {
+		case StatusOK, StatusWarn, StatusUnchanged:
+			if r.NodeID != 0 && r.Fingerprint != "" {
+				out[r.NodeID] = r.Fingerprint
+			}
+		}
+	}
+	return out
 }
 
 // Event is emitted during a run for live UI feedback.
@@ -135,7 +166,9 @@ func (e *Engine) Run(ctx context.Context, plan Plan, emit func(Event)) []Project
 func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func(Event)) ProjectResult {
 	node := item.Node
 	targetFull := item.TargetNamespace + "/" + node.Path
-	res := ProjectResult{Source: node.FullPath, Target: targetFull, Status: StatusOK}
+	res := ProjectResult{NodeID: node.ID, Source: node.FullPath, Target: targetFull, Status: StatusOK, Fingerprint: Fingerprint(item)}
+	prev, hadPrev := plan.LastFingerprints[node.ID]
+	configUnchanged := hadPrev && prev == res.Fingerprint
 	logf := func(format string, args ...any) {
 		emit(Event{Type: "log", Project: node.FullPath, Message: fmt.Sprintf(format, args...)})
 	}
@@ -217,7 +250,19 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 		if mres.Forced {
 			warn("force-overwrite", fmt.Errorf("overwrote target that had newer content (%s)", mres.Reason))
 		}
-		logf("repository mirrored")
+
+		// Nothing new on the source and the config is unchanged → skip the rest.
+		if mres.UpToDate && configUnchanged && !item.Force {
+			res.Status = StatusUnchanged
+			res.Reason = "already up to date (config and content unchanged)"
+			logf("unchanged — skipped")
+			return res
+		}
+		if mres.UpToDate {
+			logf("repository already up to date")
+		} else {
+			logf("repository mirrored")
+		}
 
 		// 4. URL rewrite. (optional, failsafe)
 		if item.Options.URLRewrite && plan.OldBaseURL != "" && plan.NewBaseURL != "" {
@@ -417,7 +462,7 @@ func (e *Engine) copyMetadata(opts config.Options, node *gitlabapi.Node, tgtProj
 
 // Summary aggregates results into counts by status.
 func Summary(results []ProjectResult) string {
-	var ok, warn, skip, fail int
+	var ok, warn, skip, unchanged, fail int
 	for _, r := range results {
 		switch r.Status {
 		case StatusOK:
@@ -426,9 +471,11 @@ func Summary(results []ProjectResult) string {
 			warn++
 		case StatusSkipped:
 			skip++
+		case StatusUnchanged:
+			unchanged++
 		case StatusFailed:
 			fail++
 		}
 	}
-	return strings.TrimSpace(fmt.Sprintf("ok=%d warn=%d skipped=%d failed=%d", ok, warn, skip, fail))
+	return strings.TrimSpace(fmt.Sprintf("ok=%d warn=%d unchanged=%d skipped=%d failed=%d", ok, warn, unchanged, skip, fail))
 }
