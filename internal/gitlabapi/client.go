@@ -561,7 +561,7 @@ func (c *Client) DeleteProjectAndWait(fullPath string, timeout time.Duration, lo
 			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("target %q not fully deleted within %s — remove the inactive project manually and retry", fullPath, timeout)
+			return fmt.Errorf("target %q not fully deleted within %s — a container image scheduled for deletion can block project removal; wait for GitLab's registry cleanup or remove the inactive project manually, then retry", fullPath, timeout)
 		}
 		if logf != nil {
 			logf("force: waiting for permanent deletion…")
