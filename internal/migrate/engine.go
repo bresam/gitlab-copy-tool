@@ -202,7 +202,7 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 		full := item.TargetNamespace + "/" + node.Path
 		if p, ferr := e.tgt.FindProject(full); ferr == nil && p != nil {
 			logf("force: deleting existing target project for a clean recreate")
-			if err := e.tgt.DeleteProjectAndWait(full, 90*time.Second); err != nil {
+			if err := e.tgt.DeleteProjectAndWait(full, 120*time.Second, logf); err != nil {
 				warn("force-delete", err)
 			} else {
 				logf("force: target deleted")

@@ -521,9 +521,11 @@ func (c *Client) createGroup(seg, name string, parentID int64, visibility string
 }
 
 // DeleteProjectAndWait deletes the project at fullPath (if it exists) and waits
-// until its path is free again (so it can be recreated), up to timeout. Used by
-// the per-repo force option for a clean recreate.
-func (c *Client) DeleteProjectAndWait(fullPath string, timeout time.Duration) error {
+// until its path is free again so it can be recreated, up to timeout. On
+// gitlab.com deletion is deferred (the project goes to "pending deletion" and
+// keeps the path), so it also requests permanent removal to free the path
+// immediately. logf (optional) reports progress during the wait.
+func (c *Client) DeleteProjectAndWait(fullPath string, timeout time.Duration, logf func(string, ...any)) error {
 	p, err := c.FindProject(fullPath)
 	if err != nil {
 		return err
@@ -531,9 +533,15 @@ func (c *Client) DeleteProjectAndWait(fullPath string, timeout time.Duration) er
 	if p == nil {
 		return nil // nothing to delete
 	}
-	if _, err := c.GL.Projects.DeleteProject(p.ID, nil); err != nil {
-		return err
-	}
+	// Mark for deletion (may be deferred), then request permanent removal so the
+	// path is freed right away. The second call needs the project to be marked
+	// first; both are best-effort.
+	_, _ = c.GL.Projects.DeleteProject(p.ID, nil)
+	_, _ = c.GL.Projects.DeleteProject(p.ID, &gitlab.DeleteProjectOptions{
+		PermanentlyRemove: gitlab.Ptr(true),
+		FullPath:          gitlab.Ptr(fullPath),
+	})
+
 	deadline := time.Now().Add(timeout)
 	for {
 		got, err := c.FindProject(fullPath)
@@ -541,9 +549,12 @@ func (c *Client) DeleteProjectAndWait(fullPath string, timeout time.Duration) er
 			return nil // path is free
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("target project %q still present after delete (deferred deletion?); path not free within %s", fullPath, timeout)
+			return fmt.Errorf("target project %q still present after delete; on gitlab.com deletion can be deferred — remove it manually (Settings → Advanced → Delete) or wait, then retry", fullPath)
 		}
-		time.Sleep(2 * time.Second)
+		if logf != nil {
+			logf("force: waiting for target deletion to complete…")
+		}
+		time.Sleep(3 * time.Second)
 	}
 }
 
