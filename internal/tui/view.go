@@ -87,6 +87,8 @@ func (m *model) View() string {
 		return m.viewDiscover()
 	case screenMap:
 		return m.viewMap()
+	case screenTarget:
+		return m.viewTarget()
 	case screenRun:
 		return m.viewRun()
 	case screenDone:
@@ -95,6 +97,41 @@ func (m *model) View() string {
 		return m.viewDryRun()
 	}
 	return ""
+}
+
+func (m *model) viewTarget() string {
+	var b strings.Builder
+	name := ""
+	for _, r := range m.rows {
+		if r.node.ID == m.pickerNode {
+			name = r.node.FullPath
+			break
+		}
+	}
+	b.WriteString(titleStyle.Render("Ziel wählen") + dimStyle.Render("  für "+name) + "\n\n")
+	b.WriteString(m.pickerInput.View() + "\n\n")
+
+	filtered := m.pickerFiltered()
+	start, end := windowRange(m.pickerCursor, len(filtered), m.visibleRows())
+	for i := start; i < end; i++ {
+		cur := "  "
+		if i == m.pickerCursor {
+			cur = cursorStyle.Render("▸ ")
+		}
+		b.WriteString(cur + filtered[i] + "\n")
+	}
+	// Manual entry row (selected when the cursor is past the list).
+	manual := strings.Trim(strings.TrimSpace(m.pickerInput.Value()), "/")
+	if manual != "" {
+		cur := "  "
+		if m.pickerCursor >= len(filtered) {
+			cur = cursorStyle.Render("▸ ")
+		}
+		b.WriteString(cur + okStyle.Render("↵ eigener Pfad: "+manual) + "\n")
+	}
+
+	b.WriteString("\n" + dimStyle.Render("tippen: filtern/eigenen Pfad · ↑/↓ wählen · enter übernehmen · ctrl+u Ziel entfernen · esc abbrechen"))
+	return b.String()
 }
 
 func (m *model) viewDryRun() string {
@@ -219,12 +256,14 @@ func (m *model) viewMap() string {
 	b.WriteString(m.renderOptions() + "\n")
 	if m.err != nil {
 		b.WriteString(errStyle.Render(m.err.Error()) + "\n")
+	} else if m.notice != "" {
+		b.WriteString(okStyle.Render(m.notice) + "\n")
 	}
-	startHint := "ctrl+s starten"
+	runHint := "ctrl+p speichern+starten"
 	if m.dryRun {
-		startHint = "ctrl+s " + warnStyle.Render("Plan zeigen (Dry-Run)")
+		runHint = "ctrl+p " + warnStyle.Render("Plan zeigen (Dry-Run)")
 	}
-	b.WriteString(dimStyle.Render("↑/↓ · space wählen · ←/→ Ziel setzen (Gruppe = vererbt) · f force · a alle · N keine · 1-6 Optionen · ") + startHint + dimStyle.Render(" · esc zurück"))
+	b.WriteString(dimStyle.Render("↑/↓ · space wählen · enter/t Ziel · ←/→ Ziel schnellwahl · f force · a alle · N keine · 1-6 Optionen · ctrl+s speichern · ") + runHint + dimStyle.Render(" · esc zurück"))
 	return b.String()
 }
 
@@ -262,8 +301,8 @@ func (m *model) renderRow(i int) string {
 
 	if r.node.Kind == "group" {
 		assigned := ""
-		if idx, ok := m.assign[r.node.ID]; ok && idx < len(m.namespaces) {
-			assigned = dimStyle.Render("  ⇒ " + m.namespaces[idx].FullPath + "/… (vererbt)")
+		if path, ok := m.assign[r.node.ID]; ok && path != "" {
+			assigned = dimStyle.Render("  ⇒ " + path + "/… (vererbt)")
 		}
 		return cursor + m.groupBox(r.node) + " " + prefix + groupStyle.Render("📁 "+r.node.Name) + assigned
 	}

@@ -23,6 +23,7 @@ const (
 	screenConnect
 	screenDiscover
 	screenMap
+	screenTarget
 	screenRun
 	screenDone
 	screenDryRun
@@ -33,6 +34,7 @@ type model struct {
 	width  int
 	height int
 	err    error
+	notice string
 	dryRun bool
 
 	// session picker
@@ -57,11 +59,17 @@ type model struct {
 	rows        []treeRow
 	namespaces  []gitlabapi.Namespace
 	selected    map[int64]bool         // project ID -> processed
-	assign      map[int64]int          // node ID (group/project) -> namespace index
+	assign      map[int64]string       // node ID (group/project) -> chosen target namespace path
 	forced      map[int64]bool         // project ID -> force overwrite target
 	optOverride map[int64]map[int]bool // node ID -> option index -> value (tri-state via presence)
 	renderTgts  map[int64]string       // transient: resolved targets for rendering
 	cursor      int
+
+	// target picker (screenTarget)
+	pickerNode   int64
+	pickerInput  textinput.Model
+	pickerCands  []string // full candidate list for the picked node
+	pickerCursor int
 
 	// run
 	events     chan tea.Msg
@@ -102,7 +110,7 @@ func newModel() model {
 		cleared:     map[string]bool{},
 		tempCleared: map[string]bool{},
 		selected:    map[int64]bool{},
-		assign:      map[int64]int{},
+		assign:      map[int64]string{},
 		forced:      map[int64]bool{},
 		optOverride: map[int64]map[int]bool{},
 		transport:   [2]string{config.TransportAuto, config.TransportAuto},

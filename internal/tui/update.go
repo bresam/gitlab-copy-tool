@@ -10,6 +10,7 @@ import (
 	"github.com/bresam/gitlab-copy-tool/internal/config"
 	"github.com/bresam/gitlab-copy-tool/internal/gitlabapi"
 	"github.com/bresam/gitlab-copy-tool/internal/migrate"
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 )
 
@@ -35,6 +36,8 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m.updateDiscover(msg)
 	case screenMap:
 		return m.updateMap(msg)
+	case screenTarget:
+		return m.updateTarget(msg)
 	case screenRun:
 		return m.updateRun(msg)
 	case screenDone:
@@ -86,7 +89,7 @@ func (m *model) updateSession(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "enter":
 			// Start from a clean working set for the chosen session.
 			m.selected = map[int64]bool{}
-			m.assign = map[int64]int{}
+			m.assign = map[int64]string{}
 			m.forced = map[int64]bool{}
 			m.optOverride = map[int64]map[int]bool{}
 			if m.sessCursor < len(m.sessions) {
@@ -288,14 +291,8 @@ func (m *model) applySavedSelection() {
 	for _, id := range m.session.Force {
 		m.forced[id] = true
 	}
-	nsIndex := map[string]int{}
-	for i, ns := range m.namespaces {
-		nsIndex[ns.FullPath] = i
-	}
 	for id, path := range m.session.Assignments {
-		if idx, ok := nsIndex[path]; ok {
-			m.assign[id] = idx
-		}
+		m.assign[id] = path
 	}
 	for id, ov := range m.session.OptionOverrides {
 		cp := make(map[int]bool, len(ov))
@@ -332,6 +329,9 @@ func (m *model) updateMap(msg tea.Msg) (tea.Model, tea.Cmd) {
 	k, ok := msg.(tea.KeyMsg)
 	if !ok {
 		return m, nil
+	}
+	if k.String() != "ctrl+s" {
+		m.notice = ""
 	}
 	switch k.String() {
 	case "ctrl+c", "q":
@@ -371,7 +371,12 @@ func (m *model) updateMap(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cycleOption(config.OptContainerRegistry)
 	case "f":
 		m.toggleForce(m.cursor)
-	case "ctrl+s", "enter":
+	case "enter", "t":
+		m.openTargetPicker()
+	case "ctrl+s":
+		m.persistSession()
+		m.notice = "Konfiguration gespeichert"
+	case "ctrl+p":
 		return m.startRun()
 	}
 	return m, nil
@@ -459,46 +464,191 @@ func (m *model) setAll(v bool) {
 }
 
 // cycleTarget cycles the target-namespace assignment of the highlighted node
-// (group or project) through: none -> ns[0] -> ns[1] -> … -> none. A group
+// through the candidate list: none -> cand[0] -> cand[1] -> … -> none. A group
 // assignment cascades to descendants (see gitlabapi.ResolveTargets).
 func (m *model) cycleTarget(i int, forward bool) {
-	if i < 0 || i >= len(m.rows) || len(m.namespaces) == 0 {
+	if i < 0 || i >= len(m.rows) {
 		return
 	}
-	id := m.rows[i].node.ID
-	idx, ok := m.assign[id]
-	last := len(m.namespaces) - 1
+	n := m.rows[i].node
+	cands := m.candidatesForNode(n)
+	if len(cands) == 0 {
+		return
+	}
+	cur, ok := m.assign[n.ID]
+	idx := -1 // -1 == none
+	if ok {
+		for k, c := range cands {
+			if c == cur {
+				idx = k
+				break
+			}
+		}
+		if idx == -1 {
+			// current is a manual value not in the list: treat as its own slot
+			cands = append([]string{cur}, cands...)
+			idx = 0
+		}
+	}
+	last := len(cands) - 1
+	next := idx
 	if forward {
-		switch {
-		case !ok:
-			m.assign[id] = 0
-		case idx >= last:
-			delete(m.assign, id) // wrap back to none
-		default:
-			m.assign[id] = idx + 1
-		}
+		next++
 	} else {
-		switch {
-		case !ok:
-			m.assign[id] = last
-		case idx == 0:
-			delete(m.assign, id) // wrap back to none
-		default:
-			m.assign[id] = idx - 1
-		}
+		next--
+	}
+	switch {
+	case next < 0:
+		delete(m.assign, n.ID) // none
+	case next > last:
+		delete(m.assign, n.ID) // wrap to none
+	default:
+		m.assign[n.ID] = cands[next]
 	}
 }
 
-// assignmentPaths converts the index-based assignments to node ID -> namespace
-// full path for gitlabapi.ResolveTargets.
+// candidatesForNode builds the ordered target-namespace suggestions for a node:
+// the existing writable target namespaces, plus source-derived paths — the
+// node's own source location (bottom-up) and that location under each existing
+// top-level target account.
+func (m *model) candidatesForNode(n *gitlabapi.Node) []string {
+	set := map[string]struct{}{}
+	var order []string
+	add := func(s string) {
+		s = strings.Trim(strings.TrimSpace(s), "/")
+		if s == "" {
+			return
+		}
+		if _, ok := set[s]; ok {
+			return
+		}
+		set[s] = struct{}{}
+		order = append(order, s)
+	}
+
+	// Source location of the node (bottom-up): for a project its parent group,
+	// for a group its own full path.
+	src := n.FullPath
+	if n.Kind == "project" {
+		src = n.NamespacePath
+	}
+	add(src) // replicate the source structure as-is
+
+	// The same source path placed under each existing top-level target account.
+	tops := map[string]struct{}{}
+	for _, ns := range m.namespaces {
+		tops[firstSeg(ns.FullPath)] = struct{}{}
+	}
+	for top := range tops {
+		add(top + "/" + src)
+	}
+
+	// All existing writable target namespaces.
+	for _, ns := range m.namespaces {
+		add(ns.FullPath)
+	}
+	return order
+}
+
+func firstSeg(p string) string {
+	p = strings.Trim(p, "/")
+	if i := strings.IndexByte(p, '/'); i >= 0 {
+		return p[:i]
+	}
+	return p
+}
+
+// assignmentPaths returns the node ID -> chosen target namespace path map.
 func (m *model) assignmentPaths() map[int64]string {
 	out := make(map[int64]string, len(m.assign))
-	for id, idx := range m.assign {
-		if idx >= 0 && idx < len(m.namespaces) {
-			out[id] = m.namespaces[idx].FullPath
+	for id, path := range m.assign {
+		out[id] = path
+	}
+	return out
+}
+
+// --- target picker (screenTarget) ----------------------------------------
+
+func (m *model) openTargetPicker() {
+	if m.cursor < 0 || m.cursor >= len(m.rows) {
+		return
+	}
+	n := m.rows[m.cursor].node
+	m.pickerNode = n.ID
+	m.pickerCands = m.candidatesForNode(n)
+	ti := textinput.New()
+	ti.Prompt = "Ziel/Suche: "
+	ti.Placeholder = "tippen zum Filtern oder freien Pfad eingeben"
+	ti.CharLimit = 256
+	ti.Width = 60
+	ti.SetValue(m.assign[n.ID])
+	ti.CursorEnd()
+	ti.Focus()
+	m.pickerInput = ti
+	m.pickerCursor = 0
+	m.screen = screenTarget
+}
+
+// pickerFiltered returns the candidates matching the current filter text.
+func (m *model) pickerFiltered() []string {
+	q := strings.ToLower(strings.TrimSpace(m.pickerInput.Value()))
+	if q == "" {
+		return m.pickerCands
+	}
+	var out []string
+	for _, c := range m.pickerCands {
+		if strings.Contains(strings.ToLower(c), q) {
+			out = append(out, c)
 		}
 	}
 	return out
+}
+
+func (m *model) updateTarget(msg tea.Msg) (tea.Model, tea.Cmd) {
+	k, ok := msg.(tea.KeyMsg)
+	if !ok {
+		return m, nil
+	}
+	switch k.String() {
+	case "ctrl+c":
+		return m, tea.Quit
+	case "esc":
+		m.screen = screenMap
+		return m, nil
+	case "up":
+		if m.pickerCursor > 0 {
+			m.pickerCursor--
+		}
+		return m, nil
+	case "down":
+		if m.pickerCursor < len(m.pickerFiltered()) {
+			m.pickerCursor++
+		}
+		return m, nil
+	case "ctrl+u": // clear assignment (inherit / none)
+		delete(m.assign, m.pickerNode)
+		m.screen = screenMap
+		return m, nil
+	case "enter":
+		filtered := m.pickerFiltered()
+		manual := strings.Trim(strings.TrimSpace(m.pickerInput.Value()), "/")
+		// Cursor at the end selects the manual entry (free path); otherwise the
+		// highlighted candidate.
+		if m.pickerCursor < len(filtered) {
+			m.assign[m.pickerNode] = filtered[m.pickerCursor]
+		} else if manual != "" {
+			m.assign[m.pickerNode] = manual
+		}
+		m.screen = screenMap
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.pickerInput, cmd = m.pickerInput.Update(msg)
+	// Keep the cursor within the (possibly shrunk) filtered range + manual row.
+	if max := len(m.pickerFiltered()); m.pickerCursor > max {
+		m.pickerCursor = max
+	}
+	return m, cmd
 }
 
 // effectiveTargets resolves the target namespace for every selected project.

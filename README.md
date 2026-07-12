@@ -53,9 +53,11 @@ quarantine an unsigned binary — clear it with
 The central screen is the **mapping**: on the left the source tree with
 checkboxes and tree lines, on the right the resolved target per repo. Both the
 **target namespace** and the **optional steps** can be set per repo **or at the
-group level** (inherited by the substructure, nearest override wins). The
-options block shows the settings for the highlighted node; `*` marks an option
-set explicitly here, dim ones are inherited.
+group level** (inherited by the substructure, nearest override wins). Press
+`enter` on a node to open the **target picker** — filter existing target
+namespaces, pick a source-derived suggestion, or type a free path (created if it
+doesn't exist). The options block shows the settings for the highlighted node;
+`*` marks an option set explicitly here, dim ones are inherited.
 
 ```
  Mapping   (source → target namespace, group target is inherited)
@@ -189,7 +191,9 @@ Flow in the UI:
 3. **Discovery**: source structure + target namespaces are loaded.
 4. **Mapping**: select repos/groups with `space`, set the target with `←/→`
    (cascades on a group), toggle options `1`–`4`.
-5. **Start** with `ctrl+s` → live progress, then a summary at the end.
+5. Press `enter` on a repo/group to pick its target (filter, free path, or a
+   suggestion), toggle options `1`–`6`, then **`ctrl+p`** to save & run (`ctrl+s`
+   saves the config without running) → live progress, then a summary.
 
 > Tip: start with **`--dry-run`** first (see below) and review the plan before
 > anything is actually pushed.
@@ -216,11 +220,13 @@ export SRC_TOKEN=glpat-…   TGT_TOKEN=glpat-…
 |-----|--------|
 | `↑/↓` | Navigate |
 | `space` | (De)select item (a group toggles all its children) |
-| `←/→` | Cycle the target namespace — on a group it cascades, on a repo it applies only there |
+| `enter` / `t` | Open the **target picker** for the highlighted node: type to filter or enter a free path; choose from existing target namespaces and source-derived suggestions (the repo's own path bottom-up, and that path under each existing account). `ctrl+u` clears the target |
+| `←/→` | Quick-cycle the target through the candidate list (on a group it cascades, on a repo only there) |
 | `f` | Toggle force-overwrite for this repo |
 | `a` / `N` | Select all / none |
 | `1`–`6` | Cycle the highlighted node's option (inherit → on → off) — Issues/MRs, CI vars, Settings, URL rewrite, Releases, Container registry. On a group it cascades to the substructure |
-| `ctrl+s` | Start the migration (or show the plan in dry-run) |
+| `ctrl+s` | **Save** the session config (no migration) |
+| `ctrl+p` | **Save and run** the migration (or show the plan in dry-run) |
 | `esc` | Back |
 
 `q` quits from any screen — except the connection form (where you type values
