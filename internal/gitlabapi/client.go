@@ -566,7 +566,10 @@ func (c *Client) SetProjectVisibility(pid int64, visibility string) error {
 	return err
 }
 
-// FindProject returns the project at the given full path, or nil if absent.
+// FindProject returns the live project at the given full path, or nil if absent.
+// A project that is pending deletion (gitlab.com renames it to
+// "<path>-deletion_scheduled-<id>" and keeps a redirect from the old path) is
+// treated as absent, so the path counts as free/creatable again.
 func (c *Client) FindProject(fullPath string) (*gitlab.Project, error) {
 	p, resp, err := c.GL.Projects.GetProject(fullPath, nil)
 	if err != nil {
@@ -574,6 +577,12 @@ func (c *Client) FindProject(fullPath string) (*gitlab.Project, error) {
 			return nil, nil
 		}
 		return nil, err
+	}
+	if p.MarkedForDeletionOn != nil {
+		return nil, nil // pending deletion → path effectively free
+	}
+	if want := strings.Trim(fullPath, "/"); !strings.EqualFold(p.PathWithNamespace, want) {
+		return nil, nil // reached via a redirect from a renamed project
 	}
 	return p, nil
 }

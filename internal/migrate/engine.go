@@ -258,7 +258,10 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 				Transport: plan.Target.Transport,
 			},
 			WorkDir: workDir,
-			Force:   item.Force,
+			// No git-level force: a force re-transfer deletes+recreates the
+			// target above, so the push goes into a fresh repo and a plain push
+			// suffices (and won't be rejected by a protected default branch).
+			Force: false,
 		}
 		mres, err := gittransport.Mirror(spec, logf)
 		if err != nil {
