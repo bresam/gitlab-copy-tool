@@ -23,8 +23,8 @@ GitLab versions** of source and target are.
                                  MRs, CI vars, …)          (target, freely mapped)
 ```
 
-Repository content (branches/tags) travels via `git clone --mirror` →
-`git push --mirror`; structure & metadata via the stable GitLab REST API v4.
+Repository content travels via `git clone --mirror` and a force+prune push of
+all **branches and tags**; structure & metadata via the stable GitLab REST API v4.
 
 > **The source GitLab is only read, never modified.** The tool clones from the
 > source and creates/updates on the target only — it never touches source repos,
@@ -83,8 +83,10 @@ doesn't exist). The options block shows the settings for the highlighted node;
 ## Features
 
 ### Repositories (the core)
-- **All branches and tags** are copied 1:1 (`git clone --mirror` →
-  `git push --mirror`) — version-independent, no API feature dependency.
+- **All branches and tags** are copied 1:1 (`git clone --mirror`, then a
+  force+prune push of `refs/heads/*` and `refs/tags/*`) — version-independent, no
+  API feature dependency. GitLab-internal hidden refs (merge-requests, pipelines,
+  keep-around) are intentionally **not** pushed, since GitLab rejects them.
 - **Existing-target guard:** if the target repo already exists, its refs are
   compared. If the target has *nothing newer*, it is fully overwritten. If it has
   newer or divergent commits/branches, the repo is **skipped with a reason**
@@ -278,7 +280,7 @@ session entirely.
 
 Before overwriting an already existing target repo, the tool compares the refs:
 
-- Target **has nothing newer** → fully overwrite (`git push --mirror`).
+- Target **has nothing newer** → fully overwrite (force+prune push of branches/tags).
 - Target **has newer/divergent** commits or its own branches → **skipped with a
   reason** (in the log and the summary).
 - With `f` (force) per repo it is overwritten anyway — then reported as a

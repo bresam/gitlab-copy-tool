@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Go CLI that migrates a self-hosted GitLab to GitLab SaaS. It copies repository
 content (all branches/tags) over the **plain git protocol** (`git clone --mirror`
-→ `git push --mirror`) and handles structure + metadata over the **GitLab REST
+→ force+prune push of `refs/heads/*`+`refs/tags/*`) and handles structure + metadata over the **GitLab REST
 API v4**. The two-channel design is deliberate: git transport makes the copy
 version-independent, the API is only used where it is stable across versions.
 

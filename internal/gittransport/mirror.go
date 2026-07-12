@@ -124,13 +124,14 @@ func Mirror(spec Spec, logf Logf) (Result, error) {
 		}
 	}
 
-	// 4. Push --mirror. Remove any guard refs first so they are not pushed.
-	if err := deleteGuardRefs(dir); err != nil {
-		return res, err
-	}
-	logf("push --mirror via %s", redact(targetURL))
-	if _, err := runGit(dir, "push", "--mirror", targetURL); err != nil {
-		return res, fmt.Errorf("push --mirror: %w", err)
+	// 4. Push branches and tags only (force + prune), NOT GitLab-internal hidden
+	//    refs. A `git push --mirror` would also try to push refs/merge-requests/*,
+	//    refs/pipelines/*, refs/keep-around/* etc. from the source mirror, which
+	//    GitLab rejects server-side ("pre-receive hook declined").
+	logf("push branches+tags via %s", redact(targetURL))
+	if _, err := runGit(dir, "push", "--force", "--prune", targetURL,
+		"refs/heads/*:refs/heads/*", "refs/tags/*:refs/tags/*"); err != nil {
+		return res, fmt.Errorf("push: %w", err)
 	}
 	res.Pushed = true
 	return res, nil
@@ -348,17 +349,4 @@ func isAncestor(dir, ancestor, descendant string) bool {
 	cmd.Dir = dir
 	cmd.Env = gitEnv()
 	return cmd.Run() == nil
-}
-
-func deleteGuardRefs(dir string) error {
-	out, err := runGit(dir, "for-each-ref", "--format=%(refname)", guardPrefix)
-	if err != nil {
-		return err
-	}
-	for _, ref := range strings.Fields(out) {
-		if _, err := runGit(dir, "update-ref", "-d", ref); err != nil {
-			return err
-		}
-	}
-	return nil
 }
