@@ -520,41 +520,53 @@ func (c *Client) createGroup(seg, name string, parentID int64, visibility string
 	return g.ID, nil
 }
 
-// DeleteProjectAndWait deletes the project at fullPath (if it exists) and waits
-// until its path is free again so it can be recreated, up to timeout. On
-// gitlab.com deletion is deferred (the project goes to "pending deletion" and
-// keeps the path), so it also requests permanent removal to free the path
-// immediately. logf (optional) reports progress during the wait.
+// DeleteProjectAndWait deletes the project at fullPath and waits until it is
+// gone, so it can be recreated cleanly. GitLab deletion is two-stage: the first
+// delete marks the project "inactive" and renames it to
+// "<path>-deletion_scheduled-<id>"; a second delete with permanently_remove and
+// the project's *current* full path removes it for good. logf reports progress.
 func (c *Client) DeleteProjectAndWait(fullPath string, timeout time.Duration, logf func(string, ...any)) error {
-	p, err := c.FindProject(fullPath)
+	p, resp, err := c.GL.Projects.GetProject(fullPath, nil)
 	if err != nil {
+		if resp != nil && resp.StatusCode == 404 {
+			return nil // nothing to delete
+		}
 		return err
 	}
-	if p == nil {
-		return nil // nothing to delete
+	id := p.ID
+
+	// Stage 1: mark for deletion (moves it to "inactive").
+	if _, err := c.GL.Projects.DeleteProject(id, nil); err != nil {
+		return fmt.Errorf("delete (stage 1): %w", err)
 	}
-	// Mark for deletion (may be deferred), then request permanent removal so the
-	// path is freed right away. The second call needs the project to be marked
-	// first; both are best-effort.
-	_, _ = c.GL.Projects.DeleteProject(p.ID, nil)
-	_, _ = c.GL.Projects.DeleteProject(p.ID, &gitlab.DeleteProjectOptions{
-		PermanentlyRemove: gitlab.Ptr(true),
-		FullPath:          gitlab.Ptr(fullPath),
-	})
 
 	deadline := time.Now().Add(timeout)
+	permTried := false
 	for {
-		got, err := c.FindProject(fullPath)
-		if err == nil && got == nil {
-			return nil // path is free
+		cur, resp, err := c.GL.Projects.GetProject(id, nil)
+		if err != nil {
+			if resp != nil && resp.StatusCode == 404 {
+				return nil // permanently gone
+			}
+			// transient error — keep waiting
+		} else if cur.MarkedForDeletionOn != nil && !permTried {
+			// Stage 2: permanently remove the now-inactive project. full_path
+			// must be its *current* (renamed) path.
+			permTried = true
+			if _, err := c.GL.Projects.DeleteProject(id, &gitlab.DeleteProjectOptions{
+				PermanentlyRemove: gitlab.Ptr(true),
+				FullPath:          gitlab.Ptr(cur.PathWithNamespace),
+			}); err != nil && logf != nil {
+				logf("force: permanent removal request failed: %v", err)
+			}
 		}
 		if time.Now().After(deadline) {
-			return fmt.Errorf("target project %q still present after delete; on gitlab.com deletion can be deferred — remove it manually (Settings → Advanced → Delete) or wait, then retry", fullPath)
+			return fmt.Errorf("target %q not fully deleted within %s — remove the inactive project manually and retry", fullPath, timeout)
 		}
 		if logf != nil {
-			logf("force: waiting for target deletion to complete…")
+			logf("force: waiting for permanent deletion…")
 		}
-		time.Sleep(3 * time.Second)
+		time.Sleep(2 * time.Second)
 	}
 }
 
