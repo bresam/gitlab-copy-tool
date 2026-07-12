@@ -108,7 +108,7 @@ func (m *model) viewTarget() string {
 			break
 		}
 	}
-	b.WriteString(titleStyle.Render("Ziel wählen") + dimStyle.Render("  für "+name) + "\n\n")
+	b.WriteString(titleStyle.Render("Choose target") + dimStyle.Render("  for "+name) + "\n\n")
 	b.WriteString(m.pickerInput.View() + "\n\n")
 
 	filtered := m.pickerFiltered()
@@ -127,16 +127,16 @@ func (m *model) viewTarget() string {
 		if m.pickerCursor >= len(filtered) {
 			cur = cursorStyle.Render("▸ ")
 		}
-		b.WriteString(cur + okStyle.Render("↵ eigener Pfad: "+manual) + "\n")
+		b.WriteString(cur + okStyle.Render("↵ custom path: "+manual) + "\n")
 	}
 
-	b.WriteString("\n" + dimStyle.Render("tippen: filtern/eigenen Pfad · ↑/↓ wählen · enter übernehmen · ctrl+u Ziel entfernen · esc abbrechen"))
+	b.WriteString("\n" + dimStyle.Render("type: filter / custom path · ↑/↓ select · enter apply · ctrl+u clear target · esc cancel"))
 	return b.String()
 }
 
 func (m *model) viewDryRun() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Dry-Run — Plan") + dimStyle.Render("   (nichts wird gepusht)") + "\n\n")
+	b.WriteString(titleStyle.Render("Dry-Run — Plan") + dimStyle.Render("   (nothing is pushed)") + "\n\n")
 	for _, it := range m.dryItems {
 		force := ""
 		if it.Force {
@@ -146,8 +146,8 @@ func (m *model) viewDryRun() string {
 			dimStyle.Render("  →  ") + it.TargetNamespace + "/" + it.Node.Path + force +
 			dimStyle.Render("  ["+optionFlags(it.Options)+"]") + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("Optionen je Repo als [..] gelistet · bekannte Pfad-Remaps: %d", len(m.session.PathMap))) + "\n\n")
-	b.WriteString(dimStyle.Render("b/esc zurück zum Mapping · q beenden"))
+	b.WriteString("\n" + dimStyle.Render(fmt.Sprintf("options per repo shown as [..] · known path remaps: %d", len(m.session.PathMap))) + "\n\n")
+	b.WriteString(dimStyle.Render("b/esc back to mapping · q quit"))
 	return b.String()
 }
 
@@ -161,14 +161,14 @@ func optionFlags(o config.Options) string {
 		}
 	}
 	if len(on) == 0 {
-		return "keine"
+		return "none"
 	}
 	return strings.Join(on, ",")
 }
 
 func (m *model) viewSession() string {
 	var b strings.Builder
-	title := "gitlab-copy-tool — Session wählen"
+	title := "gitlab-copy-tool — choose a session"
 	if m.dryRun {
 		title += "  " + warnStyle.Render("[DRY-RUN]")
 	}
@@ -191,14 +191,14 @@ func (m *model) viewSession() string {
 	if m.sessCursor == len(m.sessions) {
 		cursor = cursorStyle.Render("▸ ")
 	}
-	b.WriteString(cursor + okStyle.Render("＋ Neue Session") + "\n\n")
-	b.WriteString(dimStyle.Render("↑/↓ wählen · enter öffnen · c State leeren · d löschen · q beenden"))
+	b.WriteString(cursor + okStyle.Render("＋ New session") + "\n\n")
+	b.WriteString(dimStyle.Render("↑/↓ select · enter open · c clear state · d delete · q quit"))
 	return b.String()
 }
 
 func (m *model) viewConnect() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Verbindungen") + "\n\n")
+	b.WriteString(titleStyle.Render("Connections") + "\n\n")
 
 	render := func(fieldIdx, inputIdx int) string {
 		line := m.inputs[inputIdx].View()
@@ -216,34 +216,34 @@ func (m *model) viewConnect() string {
 		return "  " + dimStyle.Render(s)
 	}
 
-	b.WriteString(groupStyle.Render("Quelle (self-hosted)") + "\n")
+	b.WriteString(groupStyle.Render("Source (self-hosted)") + "\n")
 	b.WriteString(render(0, 0) + "\n")
 	b.WriteString(render(1, 1) + "\n")
 	b.WriteString(renderTransport(2, 0, "Transport") + "\n\n")
 
-	b.WriteString(groupStyle.Render("Ziel (SaaS)") + "\n")
+	b.WriteString(groupStyle.Render("Target (SaaS)") + "\n")
 	b.WriteString(render(3, 2) + "\n")
 	b.WriteString(render(4, 3) + "\n")
 	b.WriteString(renderTransport(5, 1, "Transport") + "\n\n")
 
 	if m.testing {
-		b.WriteString(m.spin.View() + " teste Verbindungen…\n")
+		b.WriteString(m.spin.View() + " testing connections…\n")
 	}
 	if m.err != nil {
-		b.WriteString(errStyle.Render("Fehler: "+m.err.Error()) + "\n")
+		b.WriteString(errStyle.Render("Error: "+m.err.Error()) + "\n")
 	}
-	b.WriteString("\n" + dimStyle.Render("tab wechseln · ←/→ Transport · ctrl+s verbinden · esc zurück"))
+	b.WriteString("\n" + dimStyle.Render("tab switch · ←/→ transport · ctrl+s connect · esc back"))
 	return b.String()
 }
 
 func (m *model) viewDiscover() string {
-	return "\n" + m.spin.View() + " lade Struktur von Quelle & Ziel…\n\n" +
-		dimStyle.Render("Quelle: "+m.srcInfo+"   Ziel: "+m.tgtInfo)
+	return "\n" + m.spin.View() + " loading structure from source & target…\n\n" +
+		dimStyle.Render("Source: "+m.srcInfo+"   Target: "+m.tgtInfo)
 }
 
 func (m *model) viewMap() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Mapping") + dimStyle.Render("   (Quelle → Ziel-Namespace, Gruppen-Ziel vererbt sich)") + "\n\n")
+	b.WriteString(titleStyle.Render("Mapping") + dimStyle.Render("   (source → target namespace, group target is inherited)") + "\n\n")
 
 	m.renderTgts = m.effectiveTargets()
 
@@ -259,11 +259,11 @@ func (m *model) viewMap() string {
 	} else if m.notice != "" {
 		b.WriteString(okStyle.Render(m.notice) + "\n")
 	}
-	runHint := "ctrl+p speichern+starten"
+	runHint := "ctrl+p save+run"
 	if m.dryRun {
-		runHint = "ctrl+p " + warnStyle.Render("Plan zeigen (Dry-Run)")
+		runHint = "ctrl+p " + warnStyle.Render("show plan (dry-run)")
 	}
-	b.WriteString(dimStyle.Render("↑/↓ · space wählen · enter/t Ziel · ←/→ Ziel schnellwahl · f force · a alle · N keine · 1-6 Optionen · ctrl+s speichern · ") + runHint + dimStyle.Render(" · esc zurück"))
+	b.WriteString(dimStyle.Render("↑/↓ · space select · enter/t target · ←/→ quick target · f force · a all · N none · 1-6 options · ctrl+a archive transferred · ctrl+s save · ") + runHint + dimStyle.Render(" · esc back"))
 	return b.String()
 }
 
@@ -302,7 +302,7 @@ func (m *model) renderRow(i int) string {
 	if r.node.Kind == "group" {
 		assigned := ""
 		if path, ok := m.assign[r.node.ID]; ok && path != "" {
-			assigned = dimStyle.Render("  ⇒ " + path + "/… (vererbt)")
+			assigned = dimStyle.Render("  ⇒ " + path + "/… (inherited)")
 		}
 		return cursor + m.groupBox(r.node) + " " + prefix + groupStyle.Render("📁 "+r.node.Name) + assigned
 	}
@@ -317,18 +317,22 @@ func (m *model) renderRow(i int) string {
 		if ns, ok := m.renderTgts[r.node.ID]; ok {
 			target = dimStyle.Render("  → " + ns + "/" + r.node.Path)
 		} else {
-			target = errStyle.Render("  → (kein Ziel)")
+			target = errStyle.Render("  → (no target)")
 		}
 	}
 	force := ""
 	if m.forced[r.node.ID] {
 		force = " " + warnStyle.Render("[force]")
 	}
+	archived := ""
+	if r.node.Archived {
+		archived = " " + warnStyle.Render("[archived]")
+	}
 	done := ""
 	if _, ok := m.session.PathMap[r.node.FullPath]; ok {
-		done = " " + okStyle.Render("✓ übertragen")
+		done = " " + okStyle.Render("✓ transferred")
 	}
-	return cursor + box + " " + name + target + force + done
+	return cursor + box + " " + name + target + force + done + archived
 }
 
 // groupBox renders a tri-state checkbox for a group based on how many of its
@@ -380,7 +384,7 @@ func (m *model) renderOptions() string {
 		return dimStyle.Render(label)
 	}
 
-	header := dimStyle.Render(fmt.Sprintf("Optionen für %s (1-6 setzen; * = hier gesetzt, sonst vererbt):", n.Name))
+	header := dimStyle.Render(fmt.Sprintf("Options for %s (set with 1-6; * = set here, else inherited):", n.Name))
 	line1 := tok(0) + "   " + tok(1) + "   " + tok(2)
 	line2 := tok(3) + "   " + tok(4) + "   " + tok(5)
 	return header + "\n" + line1 + "\n" + line2
@@ -388,15 +392,15 @@ func (m *model) renderOptions() string {
 
 func (m *model) viewRun() string {
 	var b strings.Builder
-	head := titleStyle.Render("Migration läuft")
+	head := titleStyle.Render("Migration running")
 	if !m.running {
 		head = titleStyle.Render("Migration")
 	}
 	b.WriteString(head + "\n")
 	if m.running {
-		status := "arbeite…"
+		status := "working…"
 		if m.projTotal > 0 {
-			status = fmt.Sprintf("Projekt %d/%d", m.projDone, m.projTotal)
+			status = fmt.Sprintf("Project %d/%d", m.projDone, m.projTotal)
 		}
 		b.WriteString(m.spin.View() + " " + status + "\n")
 	}
@@ -404,19 +408,19 @@ func (m *model) viewRun() string {
 		b.WriteString(m.prog.ViewAs(m.progFrac) + "  " + dimStyle.Render(m.progLabel) + "\n")
 	}
 	b.WriteString(m.logView.View() + "\n")
-	b.WriteString(dimStyle.Render("ctrl+c abbrechen"))
+	b.WriteString(dimStyle.Render("ctrl+c cancel"))
 	return b.String()
 }
 
 func (m *model) viewDone() string {
 	var b strings.Builder
-	b.WriteString(titleStyle.Render("Fertig") + "  " + migrate.Summary(m.results) + "\n\n")
+	b.WriteString(titleStyle.Render("Done") + "  " + migrate.Summary(m.results) + "\n\n")
 	for _, r := range m.results {
 		b.WriteString(statusGlyph(r.Status) + " " + r.Source + " " + resultDetail(r) + "\n")
 		for _, w := range r.Warnings {
 			b.WriteString("      " + warnStyle.Render("• "+w) + "\n")
 		}
 	}
-	b.WriteString("\n" + dimStyle.Render("q beenden · b zurück zum Mapping"))
+	b.WriteString("\n" + dimStyle.Render("q quit · b back to mapping"))
 	return b.String()
 }

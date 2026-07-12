@@ -195,6 +195,27 @@ type discoveredMsg struct {
 
 type runDoneMsg struct{ results []migrate.ProjectResult }
 
+// archivedMsg reports the result of archiving transferred source repos.
+type archivedMsg struct {
+	done   []int64
+	failed int
+}
+
+func archiveCmd(ids []int64) tea.Cmd {
+	return func() tea.Msg {
+		var done []int64
+		var failed int
+		for _, id := range ids {
+			if err := srcClient.ArchiveProject(id); err == nil {
+				done = append(done, id)
+			} else {
+				failed++
+			}
+		}
+		return archivedMsg{done: done, failed: failed}
+	}
+}
+
 var (
 	srcClient *gitlabapi.Client
 	tgtClient *gitlabapi.Client

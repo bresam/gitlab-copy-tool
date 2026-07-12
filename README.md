@@ -26,10 +26,11 @@ GitLab versions** of source and target are.
 Repository content travels via `git clone --mirror` and a force+prune push of
 all **branches and tags**; structure & metadata via the stable GitLab REST API v4.
 
-> **The source GitLab is only read, never modified.** The tool clones from the
-> source and creates/updates on the target only — it never touches source repos,
-> groups or settings. Archiving or deleting the old repositories after a
-> successful migration is a **manual step** you perform yourself.
+> **The source GitLab is read-only by default.** The tool clones from the source
+> and creates/updates on the target only. The one exception is an explicit,
+> opt-in action: pressing `ctrl+a` in the mapping screen **archives** the
+> already-transferred repos on the source (reversible). Deleting old repositories
+> remains a manual step you perform yourself.
 
 ## Download
 
@@ -63,7 +64,7 @@ doesn't exist). The options block shows the settings for the highlighted node;
  Mapping   (source → target namespace, group target is inherited)
 
   [~] 📁 tools                          ⇒ example-org/… (inherited)
-▸ │  ├─ [x] deployment   → example-org/tools/deployment        ✓ transferred
+▸ │  ├─ [x] deployment   → example-org/tools/deployment   ✓ transferred [archived]
   │  └─ 📁 ci
   │     └─ [x] runner    → example-org/tools/ci/runner  [force]
   └─ 📁 legacy
@@ -73,10 +74,6 @@ doesn't exist). The options block shows the settings for the highlighted node;
  1 [x] Issues/MRs   2 [x] CI-Vars   3 [x] Settings
  4 [x] URL-Rewrite  5 [x] Releases  6 [x] Container-Registry*
 ```
-
-> Note: the screens shown here are translated for the docs; the shipped UI
-> labels are currently in German. The behaviour is identical. An English UI is on
-> the roadmap.
 
 ---
 
@@ -228,6 +225,7 @@ export SRC_TOKEN=glpat-…   TGT_TOKEN=glpat-…
 | `enter` / `t` | Open the **target picker** for the highlighted node: type to filter or enter a free path; choose from existing target namespaces and source-derived suggestions (the repo's own path bottom-up, and that path under each existing account). `ctrl+u` clears the target |
 | `←/→` | Quick-cycle the target through the candidate list (on a group it cascades, on a repo only there) |
 | `f` | Toggle force for this repo — deletes & recreates the target for a clean re-transfer (also fixes pushes rejected by a protected default branch) |
+| `ctrl+a` | Archive all already-transferred repos **on the source** (reversible); an `[archived]` marker is shown behind them |
 | `a` / `N` | Select all / none |
 | `1`–`6` | Cycle the highlighted node's option (inherit → on → off) — Issues/MRs, CI vars, Settings, URL rewrite, Releases, Container registry. On a group it cascades to the substructure |
 | `ctrl+s` | **Save** the session config (no migration) |

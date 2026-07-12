@@ -85,6 +85,7 @@ type Node struct {
 	NamespacePath string
 	EmptyRepo     bool
 	HasContainers bool // project has at least one container-registry image
+	Archived      bool // project is archived on the source
 
 	Children []*Node
 }
@@ -203,7 +204,15 @@ func projectNode(p *gitlab.Project) *Node {
 		DefaultBranch: p.DefaultBranch,
 		NamespacePath: ns,
 		EmptyRepo:     p.EmptyRepo,
+		Archived:      p.Archived,
 	}
+}
+
+// ArchiveProject archives a project (reversible; used to retire migrated source
+// repos after they were copied).
+func (c *Client) ArchiveProject(pid int64) error {
+	_, _, err := c.GL.Projects.ArchiveProject(pid)
+	return err
 }
 
 func sortTree(nodes []*Node) {

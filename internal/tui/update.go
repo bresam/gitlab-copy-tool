@@ -30,6 +30,21 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.prog.Width = w
 		}
 		return m, nil
+	case archivedMsg:
+		done := make(map[int64]bool, len(msg.done))
+		for _, id := range msg.done {
+			done[id] = true
+		}
+		for _, r := range m.rows {
+			if done[r.node.ID] {
+				r.node.Archived = true
+			}
+		}
+		m.notice = fmt.Sprintf("%d repo(s) archived on the source", len(msg.done))
+		if msg.failed > 0 {
+			m.notice += fmt.Sprintf(" (%d failed)", msg.failed)
+		}
+		return m, nil
 	}
 
 	// Route by screen.
@@ -377,11 +392,13 @@ func (m *model) updateMap(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.cycleOption(config.OptContainerRegistry)
 	case "f":
 		m.toggleForce(m.cursor)
+	case "ctrl+a":
+		return m.archiveTransferred()
 	case "enter", "t":
 		m.openTargetPicker()
 	case "ctrl+s":
 		m.persistSession()
-		m.notice = "Konfiguration gespeichert"
+		m.notice = "Configuration saved"
 	case "ctrl+p":
 		return m.startRun()
 	}
@@ -459,6 +476,27 @@ func (m *model) toggleForce(i int) {
 	for _, id := range ids {
 		m.forced[id] = anyOff
 	}
+}
+
+// archiveTransferred archives, on the source, every already-transferred repo
+// (present in the session path map) that isn't archived yet.
+func (m *model) archiveTransferred() (tea.Model, tea.Cmd) {
+	var ids []int64
+	for _, r := range m.rows {
+		n := r.node
+		if n.Kind != "project" || n.Archived {
+			continue
+		}
+		if _, ok := m.session.PathMap[n.FullPath]; ok {
+			ids = append(ids, n.ID)
+		}
+	}
+	if len(ids) == 0 {
+		m.notice = "no transferred repos to archive (or already archived)"
+		return m, nil
+	}
+	m.notice = fmt.Sprintf("archiving %d transferred repo(s) on the source…", len(ids))
+	return m, archiveCmd(ids)
 }
 
 func (m *model) setAll(v bool) {
@@ -583,8 +621,8 @@ func (m *model) openTargetPicker() {
 	m.pickerNode = n.ID
 	m.pickerCands = m.candidatesForNode(n)
 	ti := textinput.New()
-	ti.Prompt = "Ziel/Suche: "
-	ti.Placeholder = "tippen zum Filtern oder freien Pfad eingeben"
+	ti.Prompt = "Target/search: "
+	ti.Placeholder = "type to filter or enter a free path"
 	ti.CharLimit = 256
 	ti.Width = 60
 	ti.SetValue(m.assign[n.ID])
@@ -688,7 +726,7 @@ func (m *model) startRun() (tea.Model, tea.Cmd) {
 	}
 	targets, unmapped := gitlabapi.ResolveTargets(m.roots, m.assignmentPaths(), m.selected)
 	if len(unmapped) > 0 {
-		m.err = fmt.Errorf("%d selektierte(s) Projekt(e) ohne Ziel-Namespace — setze ein Ziel (auch auf Gruppen-Ebene möglich)", len(unmapped))
+		m.err = fmt.Errorf("%d selected project(s) without a target namespace — set a target (group level works too)", len(unmapped))
 		return m, nil
 	}
 	optMap := gitlabapi.ResolveOptions(m.roots, m.optOverride, m.session.Options, m.selected)
