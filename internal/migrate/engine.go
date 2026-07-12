@@ -104,10 +104,14 @@ func RecordTransferred(results []ProjectResult) map[int64]string {
 
 // Event is emitted during a run for live UI feedback.
 type Event struct {
-	Type    string // "log" | "project_start" | "project_done"
+	Type    string // "log" | "project_start" | "project_done" | "progress"
 	Project string
 	Message string
 	Result  *ProjectResult
+	// Done/Total drive progress: on "project_start" they are the project index
+	// and count; on "progress" they are the sub-step counters (e.g. copied tags).
+	Done  int
+	Total int
 }
 
 // Engine holds the connected clients for a run.
@@ -150,11 +154,11 @@ func (e *Engine) Run(ctx context.Context, plan Plan, emit func(Event)) []Project
 		emit = func(Event) {}
 	}
 	results := make([]ProjectResult, 0, len(plan.Items))
-	for _, item := range plan.Items {
+	for i, item := range plan.Items {
 		if ctx.Err() != nil {
 			break
 		}
-		emit(Event{Type: "project_start", Project: item.Node.FullPath})
+		emit(Event{Type: "project_start", Project: item.Node.FullPath, Done: i + 1, Total: len(plan.Items)})
 		res := e.migrateOne(ctx, plan, item, emit)
 		results = append(results, res)
 		r := res
@@ -181,6 +185,9 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 	warn := func(context string, err error) {
 		res.Warnings = append(res.Warnings, fmt.Sprintf("%s: %v", context, err))
 		logf("warning: %s: %v", context, err)
+	}
+	progressf := func(done, total int, label string) {
+		emit(Event{Type: "progress", Project: node.FullPath, Message: label, Done: done, Total: total})
 	}
 
 	// Target visibility: source "internal" has no SaaS equivalent and must not
@@ -273,7 +280,7 @@ func (e *Engine) migrateOne(ctx context.Context, plan Plan, item Item, emit func
 	}
 
 	// 5. Metadata copy. (optional, failsafe)
-	e.copyMetadata(item.Options, node, tgtProj, warn, logf)
+	e.copyMetadata(item.Options, node, tgtProj, warn, logf, progressf)
 
 	if len(res.Warnings) > 0 && res.Status == StatusOK {
 		res.Status = StatusWarn
@@ -325,7 +332,7 @@ func (e *Engine) rewriteAndCommit(plan Plan, item Item, tgtProj *gitlab.Project,
 // copyContainerRegistry copies all container images of a project to the target
 // registry in pure Go (failsafe). It is a no-op with a warning when the registry
 // is disabled on either side.
-func (e *Engine) copyContainerRegistry(node *gitlabapi.Node, tgtProj *gitlab.Project, warn func(string, error), logf gittransport.Logf) {
+func (e *Engine) copyContainerRegistry(node *gitlabapi.Node, tgtProj *gitlab.Project, warn func(string, error), logf gittransport.Logf, progressf progressFn) {
 	images, err := e.src.ContainerImages(node.ID)
 	if err != nil {
 		warn("container-registry", err)
@@ -350,24 +357,49 @@ func (e *Engine) copyContainerRegistry(node *gitlabapi.Node, tgtProj *gitlab.Pro
 		return
 	}
 
-	var copied, failed int
+	total := 0
+	for _, img := range images {
+		total += len(img.Tags)
+	}
+	logf("container registry: %d image(s), %d tag(s) to copy", len(images), total)
+
+	var copied, failed, done int
+	if progressf != nil {
+		progressf(0, total, "container registry")
+	}
 	for _, img := range images {
 		dstImage := containerreg.TargetImage(img.Location, srcPrefix, dstPrefix)
 		for _, tag := range img.Tags {
+			short := shortImage(img.Location) + ":" + tag
+			if progressf != nil {
+				progressf(done, total, "copying "+short)
+			}
 			if err := containerreg.Copy(img.Location, dstImage, tag, e.srcCreds, e.tgtCreds); err != nil {
 				failed++
-				logf("container: %s:%s failed: %v", img.Location, tag, err)
-				continue
+				logf("container: %s failed: %v", short, err)
+			} else {
+				copied++
 			}
-			copied++
+			done++
+			if progressf != nil {
+				progressf(done, total, short)
+			}
 		}
 	}
 	if copied > 0 {
-		logf("container images copied: %d tag(s)", copied)
+		logf("container images copied: %d/%d tag(s)", copied, total)
 	}
 	if failed > 0 {
 		warn("container-registry", fmt.Errorf("%d image tag(s) failed to copy", failed))
 	}
+}
+
+// shortImage trims the registry host from an image location for compact logs.
+func shortImage(loc string) string {
+	if i := strings.IndexByte(loc, '/'); i >= 0 {
+		return loc[i+1:]
+	}
+	return loc
 }
 
 // firstSegment returns the first path segment of a namespace path, i.e. the
@@ -410,7 +442,9 @@ func RecordPathMappings(results []ProjectResult) map[string]string {
 	return out
 }
 
-func (e *Engine) copyMetadata(opts config.Options, node *gitlabapi.Node, tgtProj *gitlab.Project, warn func(string, error), logf gittransport.Logf) {
+type progressFn func(done, total int, label string)
+
+func (e *Engine) copyMetadata(opts config.Options, node *gitlabapi.Node, tgtProj *gitlab.Project, warn func(string, error), logf gittransport.Logf, progressf progressFn) {
 	if opts.Issues {
 		if err := gitlabapi.CopyLabels(e.src, e.tgt, node.ID, tgtProj.ID); err != nil {
 			warn("labels", err)
@@ -444,7 +478,7 @@ func (e *Engine) copyMetadata(opts config.Options, node *gitlabapi.Node, tgtProj
 		}
 	}
 	if opts.ContainerRegistry {
-		e.copyContainerRegistry(node, tgtProj, warn, logf)
+		e.copyContainerRegistry(node, tgtProj, warn, logf, progressf)
 	}
 	if opts.Settings {
 		srcProj, _, err := e.src.GL.Projects.GetProject(node.ID, nil)

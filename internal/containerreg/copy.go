@@ -7,12 +7,18 @@
 package containerreg
 
 import (
+	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/go-containerregistry/pkg/authn"
 	"github.com/google/go-containerregistry/pkg/crane"
 )
+
+// copyTimeout bounds a single image:tag copy so a broken or hanging tag on the
+// source cannot block the whole run.
+const copyTimeout = 10 * time.Minute
 
 // Creds are registry credentials (GitLab: username + a token with registry
 // access, e.g. a PAT with the api or read_registry/write_registry scope).
@@ -50,15 +56,30 @@ func registryHost(image string) string {
 
 // Copy copies one image:tag from source to target, including all platforms of a
 // multi-arch manifest list. Source and target may live on different registries
-// with different credentials.
+// with different credentials. It refuses to write to the source, checks the
+// source manifest first (so broken/empty tags are skipped fast), and bounds the
+// whole operation with a timeout so a hanging tag can't block the run.
 func Copy(srcImage, dstImage, tag string, src, dst Creds) error {
+	srcRef := srcImage + ":" + tag
+	dstRef := dstImage + ":" + tag
+	if srcImage == dstImage {
+		return fmt.Errorf("refusing to copy: target image equals source (%s)", srcRef)
+	}
+
 	kc := hostKeychain{
 		registryHost(srcImage): &authn.Basic{Username: src.User, Password: src.Token},
 		registryHost(dstImage): &authn.Basic{Username: dst.User, Password: dst.Token},
 	}
-	srcRef := srcImage + ":" + tag
-	dstRef := dstImage + ":" + tag
-	if err := crane.Copy(srcRef, dstRef, crane.WithAuthFromKeychain(kc)); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), copyTimeout)
+	defer cancel()
+	opts := []crane.Option{crane.WithAuthFromKeychain(kc), crane.WithContext(ctx)}
+
+	// Fast pre-check: a broken/empty source tag (no readable manifest) is
+	// skipped with a clear error instead of hanging the copy.
+	if _, err := crane.Head(srcRef, opts...); err != nil {
+		return fmt.Errorf("source tag %s unreadable, skipped: %w", srcRef, err)
+	}
+	if err := crane.Copy(srcRef, dstRef, opts...); err != nil {
 		return fmt.Errorf("copy %s -> %s: %w", srcRef, dstRef, err)
 	}
 	return nil

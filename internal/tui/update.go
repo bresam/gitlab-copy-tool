@@ -23,6 +23,12 @@ func (m *model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width, m.height = msg.Width, msg.Height
 		m.logView = newViewport(msg.Width, msg.Height)
+		if w := msg.Width - 20; w > 10 {
+			if w > 60 {
+				w = 60
+			}
+			m.prog.Width = w
+		}
 		return m, nil
 	}
 
@@ -728,6 +734,8 @@ func (m *model) startRun() (tea.Model, tea.Cmd) {
 	m.events = make(chan tea.Msg, 128)
 	m.logs = nil
 	m.running = true
+	m.progActive = false
+	m.projDone, m.projTotal = 0, 0
 	m.screen = screenRun
 	return m, tea.Batch(startRunCmd(plan, m.events), waitEvent(m.events), m.spin.Tick)
 }
@@ -805,10 +813,22 @@ func (m *model) updateRun(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *model) appendEvent(ev migrate.Event) {
 	switch ev.Type {
 	case "project_start":
-		m.logs = append(m.logs, "▶ "+ev.Project)
+		m.projDone, m.projTotal = ev.Done, ev.Total
+		m.progActive = false
+		m.logs = append(m.logs, fmt.Sprintf("▶ [%d/%d] %s", ev.Done, ev.Total, ev.Project))
 	case "log":
 		m.logs = append(m.logs, "    "+ev.Message)
+	case "progress":
+		m.progActive = true
+		if ev.Total > 0 {
+			m.progFrac = float64(ev.Done) / float64(ev.Total)
+		} else {
+			m.progFrac = 0
+		}
+		m.progLabel = fmt.Sprintf("%d/%d  %s", ev.Done, ev.Total, ev.Message)
+		return // don't spam the log; just update the bar
 	case "project_done":
+		m.progActive = false
 		if ev.Result != nil {
 			m.logs = append(m.logs, "  "+statusGlyph(ev.Result.Status)+" "+ev.Project+" "+resultDetail(*ev.Result))
 		}

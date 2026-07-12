@@ -394,7 +394,14 @@ func (m *model) viewRun() string {
 	}
 	b.WriteString(head + "\n")
 	if m.running {
-		b.WriteString(m.spin.View() + " arbeite…\n")
+		status := "arbeite…"
+		if m.projTotal > 0 {
+			status = fmt.Sprintf("Projekt %d/%d", m.projDone, m.projTotal)
+		}
+		b.WriteString(m.spin.View() + " " + status + "\n")
+	}
+	if m.progActive {
+		b.WriteString(m.prog.ViewAs(m.progFrac) + "  " + dimStyle.Render(m.progLabel) + "\n")
 	}
 	b.WriteString(m.logView.View() + "\n")
 	b.WriteString(dimStyle.Render("ctrl+c abbrechen"))

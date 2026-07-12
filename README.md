@@ -120,7 +120,10 @@ container images get the **container registry** step auto-enabled on discovery:
 - **Container registry** — copies all images + tags (incl. multi-arch) registry-
   to-registry **in pure Go** (via [go-containerregistry](https://github.com/google/go-containerregistry));
   no external tool or Docker daemon required. Off by default; needs tokens with
-  registry access. Skipped with a warning if the registry is disabled.
+  registry access. Shows a **progress bar** (tag *i/N* + current image) during
+  the copy. A broken/empty source tag is detected up front and **skipped** (with
+  a per-tag timeout) so it can't hang the run; the registry being disabled is
+  skipped with a warning.
 
 ### composer.json / URL rewrite
 After the push, the old GitLab **host** in references is replaced — in every

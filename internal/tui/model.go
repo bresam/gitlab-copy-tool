@@ -10,6 +10,7 @@ import (
 	"github.com/bresam/gitlab-copy-tool/internal/config"
 	"github.com/bresam/gitlab-copy-tool/internal/gitlabapi"
 	"github.com/bresam/gitlab-copy-tool/internal/migrate"
+	"github.com/charmbracelet/bubbles/progress"
 	"github.com/charmbracelet/bubbles/spinner"
 	"github.com/charmbracelet/bubbles/textinput"
 	"github.com/charmbracelet/bubbles/viewport"
@@ -77,7 +78,13 @@ type model struct {
 	logView    viewport.Model
 	results    []migrate.ProjectResult
 	running    bool
-	runWorkDir string         // temp run dir, removed when the run finishes
+	runWorkDir string // temp run dir, removed when the run finishes
+	projDone   int    // current project index (1-based)
+	projTotal  int    // total projects in the run
+	prog       progress.Model
+	progActive bool    // a sub-step progress bar is active (e.g. container copy)
+	progFrac   float64 // 0..1
+	progLabel  string
 	dryItems   []migrate.Item // resolved plan shown in dry-run mode
 }
 
@@ -101,6 +108,9 @@ func newModel() model {
 	sp := spinner.New()
 	sp.Spinner = spinner.Dot
 
+	pr := progress.New(progress.WithDefaultGradient())
+	pr.Width = 40
+
 	sessions, _ := config.List()
 
 	m := model{
@@ -109,6 +119,7 @@ func newModel() model {
 		spin:        sp,
 		cleared:     map[string]bool{},
 		tempCleared: map[string]bool{},
+		prog:        pr,
 		selected:    map[int64]bool{},
 		assign:      map[int64]string{},
 		forced:      map[int64]bool{},
